@@ -1,0 +1,10 @@
+channels:
+  - defaults
+dependencies:
+  - python=3.9
+  - pytorch
+  - cudatoolkit=11.3
+  - transformers=4.16.2
+  - datasets
+  - rdflib
+  - scipy
