@@ -15,11 +15,9 @@ import mwep_dataset
 
 # parse cmdline arguments
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--data_folder',
-    default="/home/stefan/Projects/entity-assisted/data/minimal/bin"
-)
+parser.add_argument('--data_folder', default="../data/minimal/bin")
 
+parser.add_argument('--mwep_home', default='../mwep')
 parser.add_argument('--runs_folder', default='runs')
 parser.add_argument('--run_name', default=None)
 
@@ -59,7 +57,7 @@ with open(os.path.join(run_path, 'config.json'), 'w') as fp:
 dataset = load_dataset(
     mwep_dataset.__file__,
     data_dir=config['data_folder'],
-    mwep_path="/home/stefan/Projects/entity-assisted/mwep",
+    mwep_path=config['mwep_home'],
 ).flatten().remove_columns(
     [
         'uri',
