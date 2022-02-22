@@ -72,7 +72,7 @@ tokenizer = AutoTokenizer.from_pretrained(config['model'])
 tokenized_dataset = dataset.map(
     lambda examples: tokenizer(examples['content'], padding='max_length', truncation=True),
     batched=True
-)
+).remove_columns(['content'])
 
 model = AutoModelForSequenceClassification.from_pretrained(config['model'], num_labels=4)
 
