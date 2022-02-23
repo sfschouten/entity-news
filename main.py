@@ -2,11 +2,12 @@ import argparse
 import os
 import json
 import datetime
+import pprint
 
 import numpy as np
 from datasets import load_dataset, load_metric
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, \
-    Trainer
+    Trainer, EarlyStoppingCallback
 
 import mwep_dataset
 
@@ -32,8 +33,8 @@ parser.add_argument('--continue', action='store_true')
 
 
 # hyper-parameters
-# parser.add_argument('--max_nr_epochs', default=1000, type=int)
-# parser.add_argument('--early_stopping_patience', default=15, type=int)
+parser.add_argument('--max_nr_epochs', default=100, type=int)
+parser.add_argument('--early_stopping_patience', default=5, type=int)
 parser.add_argument('--batch_size_train', default=64, type=int)
 parser.add_argument('--batch_size_eval', default=64, type=int)
 # parser.add_argument('--learning_rate_base', default=1e-4, type=float)
@@ -88,10 +89,13 @@ def compute_metrics(eval_pred):
 
 training_args = TrainingArguments(
     run_path,
+    fp16=True,
+    evaluation_strategy="steps",
+    num_train_epochs=config['max_nr_epochs'],
     per_device_train_batch_size=config['batch_size_train'],
     per_device_eval_batch_size=config['batch_size_eval'],
-    fp16=True,
-    evaluation_strategy="epoch",
+    load_best_model_at_end=True,
+    eval_steps=500,
 )
 trainer = Trainer(
     model=model,
@@ -99,10 +103,14 @@ trainer = Trainer(
     train_dataset=tokenized_dataset['train'],
     eval_dataset=tokenized_dataset['validation'],
     compute_metrics=compute_metrics,
+    callbacks=[
+        EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
+    ]
 )
 if config['continue']:
     trainer.train(resume_from_checkpoint=config['checkpoint'])
 else:
     trainer.train()
 
-trainer.evaluate(tokenized_dataset['test'])
+result = trainer.evaluate(tokenized_dataset['test'])
+pprint.pprint(result)
