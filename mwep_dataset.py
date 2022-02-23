@@ -14,6 +14,8 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
     mwep_path: str = None
     mwep_event_types_path: str = None
 
+    split_level: str = 'incident'
+
     def __post_init__(self):
         if self.mwep_path is None:
             raise ValueError("Loading an MWEP dataset requires you specify the path to MWEP.")
@@ -55,7 +57,6 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager: DownloadManager):
-
         # set seed
         random.seed(self.RANDOM_SEED)
 
@@ -91,14 +92,48 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 for inc_i, inc in enumerate(collection.incidents)
                 for txt_i, _ in enumerate(inc.reference_texts)
             )
-            c_test_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
-            c_idxs -= set(c_test_idxs)
-            c_valid_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
-            c_idxs -= set(c_valid_idxs)
 
-            train_idxs.update(c_idxs)
-            valid_idxs.update(c_valid_idxs)
-            test_idxs.update(c_test_idxs)
+            def article_level_split():
+                nonlocal c_idxs
+                c_test_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
+                c_idxs -= set(c_test_idxs)
+                c_valid_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
+                c_idxs -= set(c_valid_idxs)
+
+                train_idxs.update(c_idxs)
+                valid_idxs.update(c_valid_idxs)
+                test_idxs.update(c_test_idxs)
+
+            def incident_level_split():
+                nonlocal c_idxs
+                c_inc_idxs = list(range(len(collection.incidents)))
+                random.shuffle(c_inc_idxs)
+
+                def split_off_eval():
+                    c_eval_idxs = set()
+                    while len(c_eval_idxs) < self.EVAL_SPLITS_SIZE:
+                        to_add = c_inc_idxs.pop()
+                        c_eval_idxs.update(set(
+                            (f, inc_i, txt_i) for (f, inc_i, txt_i) in c_idxs if inc_i == to_add
+                        ))
+                    return c_eval_idxs
+
+                # split off validation and test sets
+                valid_idxs.update(split_off_eval())
+                test_idxs.update(split_off_eval())
+
+                # add rest as training
+                c_inc_idxs = set(c_inc_idxs)
+                train_idxs.update(set(
+                    (f, inc_i, txt_i) for (f, inc_i, txt_i) in c_idxs if inc_i in c_inc_idxs
+                ))
+
+            if self.config.split_level == 'article':
+                article_level_split()
+            elif self.config.split_level == 'incident':
+                incident_level_split()
+            else:
+                raise ValueError('Invalid split_level!')
 
         return [
             datasets.SplitGenerator(
