@@ -37,6 +37,7 @@ parser.add_argument('--max_nr_epochs', default=100, type=int)
 parser.add_argument('--early_stopping_patience', default=5, type=int)
 parser.add_argument('--batch_size_train', default=64, type=int)
 parser.add_argument('--batch_size_eval', default=64, type=int)
+parser.add_argument('--gradient_acc_steps', default=1, type=int)
 # parser.add_argument('--learning_rate_base', default=1e-4, type=float)
 # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
 
@@ -94,6 +95,7 @@ training_args = TrainingArguments(
     num_train_epochs=config['max_nr_epochs'],
     per_device_train_batch_size=config['batch_size_train'],
     per_device_eval_batch_size=config['batch_size_eval'],
+    gradient_accumulation_steps=config['gradient_acc_steps'],
     load_best_model_at_end=True,
     metric_for_best_model='accuracy',
     eval_steps=500,
