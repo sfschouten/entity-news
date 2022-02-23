@@ -3,6 +3,7 @@ import os
 import json
 import datetime
 
+import numpy as np
 from datasets import load_dataset, load_metric
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, \
     Trainer
@@ -76,21 +77,32 @@ tokenized_dataset = dataset.map(
 
 model = AutoModelForSequenceClassification.from_pretrained(config['model'], num_labels=4)
 
+acc_metric = load_metric('accuracy')
+
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    return acc_metric.compute(predictions=preds, references=labels)
+
+
 training_args = TrainingArguments(
     run_path,
     per_device_train_batch_size=config['batch_size_train'],
     per_device_eval_batch_size=config['batch_size_eval'],
     fp16=True,
+    evaluation_strategy="epoch",
 )
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=tokenized_dataset['train'],
     eval_dataset=tokenized_dataset['validation'],
+    compute_metrics=compute_metrics,
 )
 if config['continue']:
     trainer.train(resume_from_checkpoint=config['checkpoint'])
 else:
     trainer.train()
 
-
+trainer.evaluate(tokenized_dataset['test'])

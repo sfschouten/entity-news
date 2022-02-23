@@ -10,3 +10,4 @@ dependencies:
   - datasets>=1.18
   - rdflib
   - scipy
+  - scikit-learn

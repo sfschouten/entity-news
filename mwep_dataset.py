@@ -132,14 +132,51 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
 
 if __name__ == "__main__":
+    # disable caching for this test code
     datasets.set_caching_enabled(False)
 
+    # load a dataset
     dataset = load_dataset(
         __file__,
-        data_dir="/home/stefan/Projects/entity-assisted/data/minimal/bin",
-        mwep_path="/home/stefan/Projects/entity-assisted/mwep",
+        data_dir="../data/minimal/bin",
+        mwep_path="../mwep",
     )
 
+    # print some samples
     import pprint
     test = dataset['test'].select(range(10)).flatten()
     test.map(lambda x: pprint.pprint(x))
+
+    # tokenize and print statistics of nr of tokens
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained('distilbert-base-cased')
+
+    tokenized_dataset = dataset.map(
+        lambda examples: tokenizer(examples['content'], padding='max_length', truncation=False),
+        batched=True
+    ).remove_columns(['content'])
+
+    from collections import Counter
+    bins = Counter()
+    BIN_SIZE = 16
+
+
+    def count(example):
+        bin_ = sum(example['attention_mask']) // BIN_SIZE
+        bins[bin_] += 1
+
+    tokenized_dataset.map(count)
+
+    dataset_size = sum(dataset.num_rows.values())
+
+    last_count = 0
+    print(" bin |  #  |   cum |       %")
+    print("----------------------------")
+    for i in sorted(bins.keys()):
+        last_count += bins[i]
+        print(
+            f"{BIN_SIZE*i:>4} | "
+            f"{bins[i]:>3} | "
+            f"{last_count:>5} | "
+            f"{100*last_count/dataset_size:>6.2f}%"
+        )
