@@ -161,21 +161,21 @@ def create_multitask_class(model_cls: Type[T]):
             # finally, forward the task-specific heads, passing the arguments extracted before
             all_results = {key: task(outputs, *task_args[key]) for key, task in self.tasks.items()}
 
-            result = MultipleTasksOutput(
+            kwargs = {
+                "f{task}_{key}": values
+                for task, results in all_results.items()
+                for key, values in results.items()
+                if key != 'loss'
+            }
+            return MultipleTasksOutput(
                 loss=sum(
                     value.view(())
                     for results in all_results.values()
                     for key, value in results.items()
                     if key == 'loss' and value is not None
                 ),
-                **{
-                    f"{task}_{key}": values
-                    for task, results in all_results.items()
-                    for key, values in results.items()
-                    if key != 'loss'
-                }
+                **kwargs
             )
-            return result
 
         def get_position_embeddings(self) -> nn.Embedding:
             """
