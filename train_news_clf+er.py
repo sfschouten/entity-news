@@ -65,16 +65,15 @@ def train_news_clf(config):
         gradient_accumulation_steps=config['gradient_acc_steps'],
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
-        eval_steps=5,#00,
+        eval_steps=500,
         remove_unused_columns=False,
-        #label_names=['nc_labels'],
         label_names=[f"{key}_labels" for key in datasets.keys()]
     )
     trainer = MultitaskTrainer(
         model=model,
         args=training_args,
         train_dataset=datasets,
-        eval_dataset=nc_dataset['validation'].shard(num_shards=100, index=0),
+        eval_dataset=nc_dataset['validation'],
         compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
