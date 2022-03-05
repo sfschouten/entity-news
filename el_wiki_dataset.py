@@ -1,8 +1,11 @@
+import sys
+
 from dataclasses import dataclass
 from typing import Callable
 
 import datasets
 from datasets import load_dataset, DownloadManager, DatasetInfo
+
 
 _DESCRIPTION = """\
 Wrapper around the KILT-Wikipedia dataset for ease of use with Entity Linking.
@@ -54,6 +57,11 @@ class KILTWikipediaForELConfig(datasets.BuilderConfig):
     mention_extractor: Callable = basic_mention_extractor
 
     max_mention_context_length: int = 500
+
+    shuffle_base_dataset: bool = False
+    shuffle_base_dataset_seed = None
+
+    max_samples: int = sys.maxsize
 
     def __post_init__(self):
         if self.optional_fields_to_add is None:
@@ -109,6 +117,12 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
             'kilt_wikipedia',
             split='full',
         )
+
+        if self.config.shuffle_base_dataset:
+            self.base_dataset = self.base_dataset.shuffle(
+                seed=self.config.shuffle_base_dataset_seed
+            )
+
         return [
             datasets.SplitGenerator(name="full", gen_kwargs={})
         ]
@@ -117,6 +131,8 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
         entity_idxs = {}        # indices of entities
         entity_mentions = {}    # where entities are mentioned
         m_idx = 0
+        stop_condition = lambda: \
+            m_idx + len(entity_mentions[entity['wikipedia_id']]) >= self.config.max_samples
 
         def new_samples(wikipedia_id):
             """
@@ -147,7 +163,7 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
                 yield m_idx, result
                 m_idx += 1
 
-        # First build op index of:
+        # First build index of:
         #   1. which entities mention each other (`entity_mentions`),
         #   2. the index in the dataset of each entity (`entity_idxs`); and
         # immediately yield mentions from entities that occur before the entity they mention.
@@ -165,11 +181,15 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
                 )
 
             if entity['wikipedia_id'] in entity_mentions:
+                if stop_condition():
+                    return
                 yield from new_samples(entity['wikipedia_id'])
 
         # Now yield mentions from entities that occurred after the entities they mentioned.
         for e_idx, entity in enumerate(self.base_dataset):
             if entity['wikipedia_id'] in entity_mentions:
+                if stop_condition:
+                    return
                 yield from new_samples(entity['wikipedia_id'])
 
 
