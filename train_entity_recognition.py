@@ -1,4 +1,5 @@
 import argparse
+from functools import partial
 
 import numpy as np
 
@@ -64,6 +65,21 @@ def entity_recognition_dataset(config, tokenizer):
     return tokenized_dataset
 
 
+def compute_er_metrics(seq_metric, eval_pred):
+    def swap4lbl(ndarray):
+        return [
+            list(map(lambda x: {I: 'I', O: 'O', B: 'B'}[x.item()], row))
+            for row in ndarray
+        ]
+
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    labels = swap4lbl(labels)
+    preds = swap4lbl(preds)
+    er_result = seq_metric.compute(predictions=preds, references=labels, scheme='IOB2')
+    return er_result
+
+
 def train_entity_linking(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
     dataset = entity_recognition_dataset(config, tokenizer)
@@ -75,24 +91,7 @@ def train_entity_linking(config):
         'test':  valid_test['test']
     })
 
-    #acc_metric = load_metric('accuracy')
     seq_metric = load_metric('seqeval')
-
-    def compute_metrics(eval_pred):
-
-        def swap4lbl(ndarray):
-            return [
-                list(map(lambda x: {I: 'I', O: 'O', B: 'B'}[x.item()], row))
-                for row in ndarray
-            ]
-
-        logits, labels = eval_pred
-        preds = np.argmax(logits, axis=-1)
-        labels = swap4lbl(labels)
-        preds = swap4lbl(preds)
-        #return acc_metric.compute(predictions=preds.reshape(-1), references=labels.reshape(-1))
-        er_result = seq_metric.compute(predictions=preds, references=labels, scheme='IOB2')
-        return er_result
 
     # load model
     model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
@@ -106,7 +105,7 @@ def train_entity_linking(config):
         per_device_eval_batch_size=config['batch_size_eval'],
         gradient_accumulation_steps=config['gradient_acc_steps'],
         load_best_model_at_end=True,
-        metric_for_best_model='overall_accuracy',
+        metric_for_best_model='overall_f1',
         eval_steps=500,
         max_steps=1000000,
     )
@@ -115,7 +114,7 @@ def train_entity_linking(config):
         args=training_args,
         train_dataset=dataset['train'],
         eval_dataset=dataset['validation'],
-        compute_metrics=compute_metrics,
+        compute_metrics=partial(compute_er_metrics, seq_metric),
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
         ]

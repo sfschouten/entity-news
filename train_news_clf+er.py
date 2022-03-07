@@ -9,7 +9,7 @@ from modeling_multi_task import create_multitask_class, SequenceClassification, 
 from multitask_trainer import MultitaskTrainer
 from utils import create_run_folder_and_config_dict
 
-from train_entity_recognition import entity_recognition_dataset
+from train_entity_recognition import entity_recognition_dataset, compute_er_metrics
 from train_news_clf import news_clf_dataset
 
 
@@ -39,15 +39,14 @@ def train_news_clf(config):
 
     # metric
     acc_metric = load_metric('accuracy')
-    #seq_metric = load_metric('seqeval')
+    seq_metric = load_metric('seqeval')
 
     def compute_metrics(eval_pred):
         (nc_logits, er_logits), (nc_labels, er_labels) = eval_pred
         metrics = {}
         if not (er_labels == -1).all():
-            preds = np.argmax(er_logits, axis=-1)
-            #er_result = seq_metric.compute(predictions=preds, references=er_labels)
-            #metrics.update(er_result)
+            er_metrics = compute_er_metrics(seq_metric, (er_logits, er_labels))
+            metrics.update(er_metrics)
         if not (nc_labels == -1).all():
             preds = np.argmax(nc_logits, axis=-1)
             nc_acc = acc_metric.compute(predictions=preds, references=nc_labels)
