@@ -12,17 +12,23 @@ I, O, B = 0, 1, 2
 
 
 def construct_iob_labels(example, batch_encoding: BatchEncoding):
+    def warn(s_t, e_t, s_c, e_c):
+        print(f"\nWARNING: NoneType ..."
+              f"\nwith start_token={s_t}, end_token={e_t} "
+              f"\nfor start_char={s_c}, end_char={e_c} "
+              f"\nfor text: {example['mentioning_text']}")
+
     labels = [O] * len(batch_encoding['input_ids'])
     start_chars = example['mentions']['start_char']
     end_chars = example['mentions']['end_char']
     for start_char, end_char in zip(start_chars, end_chars):
+        if start_char < 0 or end_char < 0:
+            warn(-1, -1, start_char, end_char)
+            continue
         start_token = batch_encoding.char_to_token(start_char)
         end_token = batch_encoding.char_to_token(end_char-1)
-        if start_token is None or end_token is None or start_token < 0 or end_token < 0:
-            print(f"\nWARNING: NoneType ..."
-                  f"\nwith start_token={start_token}, end_token={end_token} "
-                  f"\nfor start_char={start_char}, end_char={end_char} "
-                  f"\nfor text: {example['mentioning_text']}")
+        if start_token is None or end_token is None:
+            warn(start_token, end_token, start_char, end_char)
             continue
         labels[start_token] = B
         for t in range(start_token + 1, end_token):
