@@ -79,10 +79,19 @@ def train_entity_linking(config):
     seq_metric = load_metric('seqeval')
 
     def compute_metrics(eval_pred):
+
+        def swap4lbl(ndarray):
+            return [
+                list(map(lambda x: {I: 'I', O: 'O', B: 'B'}[x.item()], row))
+                for row in ndarray
+            ]
+
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
+        labels = swap4lbl(labels)
+        preds = swap4lbl(preds)
         #return acc_metric.compute(predictions=preds.reshape(-1), references=labels.reshape(-1))
-        er_result = seq_metric.compute(predictions=preds, references=labels)
+        er_result = seq_metric.compute(predictions=preds, references=labels, scheme='IOB2')
         return er_result
 
     # load model
@@ -97,7 +106,7 @@ def train_entity_linking(config):
         per_device_eval_batch_size=config['batch_size_eval'],
         gradient_accumulation_steps=config['gradient_acc_steps'],
         load_best_model_at_end=True,
-        metric_for_best_model='accuracy',
+        metric_for_best_model='overall_accuracy',
         eval_steps=500,
         max_steps=1000000,
     )
