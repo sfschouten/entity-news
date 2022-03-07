@@ -75,12 +75,15 @@ def train_entity_linking(config):
         'test':  valid_test['test']
     })
 
-    acc_metric = load_metric('accuracy')
+    #acc_metric = load_metric('accuracy')
+    seq_metric = load_metric('seqeval')
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
-        return acc_metric.compute(predictions=preds.reshape(-1), references=labels.reshape(-1))
+        #return acc_metric.compute(predictions=preds.reshape(-1), references=labels.reshape(-1))
+        er_result = seq_metric.compute(predictions=preds, references=labels)
+        return er_result
 
     # load model
     model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
