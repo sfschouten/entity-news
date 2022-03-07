@@ -68,8 +68,7 @@ def train_entity_linking(config):
     tokenized_dataset = entity_recognition_dataset(config, tokenizer)
 
     # load model
-    model = AutoModel.from_pretrained(config['model'])
-    #model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
+    model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
 
     training_args = TrainingArguments(
         config['run_path'],
