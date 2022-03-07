@@ -1,11 +1,12 @@
 import argparse
 
-from datasets import load_dataset
+import numpy as np
+
+from datasets import load_dataset, load_metric, DatasetDict
 from transformers import AutoModel, AutoTokenizer, BatchEncoding, AutoModelForTokenClassification, \
     TrainingArguments, Trainer, EarlyStoppingCallback
 
 from utils import create_run_folder_and_config_dict
-
 import el_wiki_dataset
 
 I, O, B = 0, 1, 2
@@ -44,7 +45,7 @@ def entity_recognition_dataset(config, tokenizer):
         split='full',
         # streaming=True,
         # shuffle_base_dataset=True,
-        max_samples=1000,
+        # max_samples=1000,
     )
 
     # tokenize
@@ -65,7 +66,21 @@ def entity_recognition_dataset(config, tokenizer):
 
 def train_entity_linking(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
-    tokenized_dataset = entity_recognition_dataset(config, tokenizer)
+    dataset = entity_recognition_dataset(config, tokenizer)
+    train_eval = dataset.train_test_split(test_size=0.01)
+    valid_test = train_eval['test'].train_test_split(test_size=0.5)
+    dataset = DatasetDict({
+        'train': train_eval['train'],
+        'validation': valid_test['train'],
+        'test':  valid_test['test']
+    })
+
+    acc_metric = load_metric('accuracy')
+
+    def compute_metrics(eval_pred):
+        logits, labels = eval_pred
+        preds = np.argmax(logits, axis=-1)
+        return acc_metric.compute(predictions=preds.reshape(-1), references=labels.reshape(-1))
 
     # load model
     model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
@@ -86,9 +101,9 @@ def train_entity_linking(config):
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset,
-        #eval_dataset=tokenized_dataset['validation'],
-        #compute_metrics=compute_metrics,
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['validation'],
+        compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
         ]
@@ -98,7 +113,8 @@ def train_entity_linking(config):
     else:
         trainer.train()
 
-    #result = trainer.evaluate(tokenized_dataset['test'])
+    result = trainer.evaluate(dataset['test'])
+    print(result)
 
 
 if __name__ == "__main__":
