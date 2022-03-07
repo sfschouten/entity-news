@@ -162,7 +162,7 @@ def create_multitask_class(model_cls: Type[T]):
             all_results = {key: task(outputs, *task_args[key]) for key, task in self.tasks.items()}
 
             kwargs = {
-                "f{task}_{key}": values
+                f"{task}_{key}": values
                 for task, results in all_results.items()
                 for key, values in results.items()
                 if key != 'loss'
