@@ -18,6 +18,12 @@ def construct_iob_labels(example, batch_encoding: BatchEncoding):
     for start_char, end_char in zip(start_chars, end_chars):
         start_token = batch_encoding.char_to_token(start_char)
         end_token = batch_encoding.char_to_token(end_char-1)
+        if start_token is None or end_token is None:
+            print(f"\nWARNING: NoneType ..."
+                  f"\nwith start_token={start_token}, end_token={end_token} "
+                  f"\nfor start_char={start_char}, end_char={end_char} "
+                  f"\nfor text: {example['mentioning_text']}")
+            continue
         labels[start_token] = B
         for t in range(start_token + 1, end_token):
             labels[t] = I

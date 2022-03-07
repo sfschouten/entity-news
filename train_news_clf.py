@@ -58,7 +58,7 @@ def train_news_clf(config):
         gradient_accumulation_steps=config['gradient_acc_steps'],
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
-        eval_steps=5,#00,
+        eval_steps=500,
     )
     trainer = Trainer(
         model=model,
