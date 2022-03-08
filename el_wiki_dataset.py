@@ -131,8 +131,9 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
         entity_idxs = {}        # indices of entities
         entity_mentions = {}    # where entities are mentioned
         m_idx = 0
-        stop_condition = lambda: \
-            m_idx + len(entity_mentions[entity['wikipedia_id']]) >= self.config.max_samples
+
+        def stop_condition():
+            return m_idx + len(entity_mentions[entity['wikipedia_id']]) >= self.config.max_samples
 
         def new_samples(wikipedia_id):
             """
@@ -141,7 +142,8 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
             """
             nonlocal m_idx
 
-            for mentioner_id, anchor_idx in entity_mentions.pop(wikipedia_id):
+            entity_mentions_ = entity_mentions.pop(wikipedia_id)
+            for mentioner_id, anchor_idx in entity_mentions_:
                 mentioner = self.base_dataset[entity_idxs[mentioner_id]]
                 mentioned = self.base_dataset[entity_idxs[wikipedia_id]]
 
@@ -182,15 +184,19 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
 
             if entity['wikipedia_id'] in entity_mentions:
                 if stop_condition():
+                    print("Reached configured maximum number of samples, stopping generation.")
                     return
                 yield from new_samples(entity['wikipedia_id'])
 
         # Now yield mentions from entities that occurred after the entities they mentioned.
-        for e_idx, entity in enumerate(self.base_dataset):
+        for entity in self.base_dataset:
             if entity['wikipedia_id'] in entity_mentions:
-                if stop_condition:
+                if stop_condition():
+                    print("Reached configured maximum number of samples, stopping generation.")
                     return
                 yield from new_samples(entity['wikipedia_id'])
+
+        print(f"All possible mentions have been generated. Last mention index: {m_idx}.")
 
 
 if __name__ == "__main__":
