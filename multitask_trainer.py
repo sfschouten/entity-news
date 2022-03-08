@@ -16,7 +16,7 @@ limitations under the License.
 """
 
 from typing import Dict, Union, Optional, List, Tuple, Any
-from itertools import cycle
+from itertools import cycle, islice
 
 import torch
 import torch.nn as nn
@@ -83,7 +83,7 @@ class EvenMTDL(MultitaskDataloader):
         return 2 * smallest
 
     def __iter__(self):
-        task_choice_cycle = cycle(range(len(self.task_name_list)))
+        task_choice_cycle = islice(cycle(range(len(self.task_name_list))), len(self))
         dataloader_iter_dict = {
             task_name: iter(dataloader)
             for task_name, dataloader in self.dataloader_dict.items()
