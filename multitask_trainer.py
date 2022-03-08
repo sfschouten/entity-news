@@ -16,6 +16,7 @@ limitations under the License.
 """
 
 from typing import Dict, Union, Optional, List, Tuple, Any
+from itertools import cycle
 
 import torch
 import torch.nn as nn
@@ -34,8 +35,7 @@ if is_sagemaker_mp_enabled():
 
 class MultitaskDataloader:
     """
-    Data loader that combines and samples from multiple single-task
-    data loaders.
+    Data loader that combines and samples from multiple single-task data loaders.
     """
 
     def __init__(self, dataloader_dict):
@@ -50,15 +50,18 @@ class MultitaskDataloader:
         )
 
     def __len__(self):
+        raise NotImplementedError
+
+    def __iter__(self):
+        raise NotImplementedError
+
+
+class SizeProportionalMTDL(MultitaskDataloader):
+
+    def __len__(self):
         return sum(self.num_batches_dict.values())
 
     def __iter__(self):
-        """
-        For each batch, sample a task, and yield a batch from the respective
-        task Dataloader.
-        We use size-proportional sampling, but you could easily modify this
-        to sample from some-other distribution.
-        """
         task_choice_list = []
         for i, task_name in enumerate(self.task_name_list):
             task_choice_list += [i] * self.num_batches_dict[task_name]
@@ -73,7 +76,29 @@ class MultitaskDataloader:
             yield next(dataloader_iter_dict[task_name])
 
 
+class EvenMTDL(MultitaskDataloader):
+
+    def __len__(self):
+        smallest = min(self.num_batches_dict.values())
+        return 2 * smallest
+
+    def __iter__(self):
+        task_choice_cycle = cycle(range(len(self.task_name_list)))
+        dataloader_iter_dict = {
+            task_name: iter(dataloader)
+            for task_name, dataloader in self.dataloader_dict.items()
+        }
+        for task_choice in task_choice_cycle:
+            task_name = self.task_name_list[task_choice]
+            yield next(dataloader_iter_dict[task_name])
+
+
 class MultitaskTrainer(transformers.Trainer):
+
+    def __init__(self, *args, multitask_dataloader_type=SizeProportionalMTDL, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.multitask_dataloader_type = multitask_dataloader_type
+
     def get_single_train_dataloader(self, train_dataset):
         """
         Create a single-task data loader that also yields task names
@@ -101,7 +126,7 @@ class MultitaskTrainer(transformers.Trainer):
         but an iterable that returns a generator that samples from each
         task Dataloader
         """
-        return MultitaskDataloader(
+        return self.multitask_dataloader_type(
             {
                 task_name: self.get_single_train_dataloader(task_dataset)
                 for task_name, task_dataset in self.train_dataset.items()

@@ -142,12 +142,16 @@ def create_multitask_class(model_cls: Type[T]):
 
     class ModelForMultipleTasks(model_cls):
 
-        def __init__(self, transformer_model: model_cls, tasks: List[Tuple[str, Type[Task]]]):
+        def __init__(self, transformer_model: model_cls,
+                     tasks: List[Tuple[str, float, Type[Task]]]):
             config = transformer_model.config
             super().__init__(config)
 
             self.transformer_model = transformer_model
-            self.tasks = nn.ModuleDict({key: type_(key, config) for key, type_ in tasks})
+
+            self.loss_weights = {key: weight for key, (weight, _) in tasks}
+            self.normalizer = sum(self.loss_weights.values())
+            self.tasks = nn.ModuleDict({key: type_(key, config) for key, (_, type_) in tasks})
 
             self.post_init()
 
@@ -169,8 +173,8 @@ def create_multitask_class(model_cls: Type[T]):
             }
             return MultipleTasksOutput(
                 loss=sum(
-                    value.view(())
-                    for results in all_results.values()
+                    self.loss_weights[task] * value.view(())
+                    for task, results in all_results.items()
                     for key, value in results.items()
                     if key == 'loss' and value is not None
                 ),

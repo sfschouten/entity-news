@@ -6,7 +6,7 @@ from datasets import load_metric
 from transformers import AutoTokenizer, AutoModel, TrainingArguments, EarlyStoppingCallback
 
 from modeling_multi_task import create_multitask_class, SequenceClassification, TokenClassification
-from multitask_trainer import MultitaskTrainer
+from multitask_trainer import MultitaskTrainer, EvenMTDL
 from utils import create_run_folder_and_config_dict
 
 from train_entity_recognition import entity_recognition_dataset, compute_er_metrics
@@ -24,8 +24,8 @@ def train_news_clf(config):
         "er": entity_recognition_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
     }
     tasks = {
-        "nc": SequenceClassification,
-        "er": TokenClassification,
+        "nc": (0.9, SequenceClassification),
+        "er": (0.1, TokenClassification),
     }
 
     # model and configuration
@@ -76,7 +76,8 @@ def train_news_clf(config):
         compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
-        ]
+        ],
+        multitask_dataloader_type=EvenMTDL
     )
     if config['continue']:
         trainer.train(resume_from_checkpoint=config['checkpoint'])
