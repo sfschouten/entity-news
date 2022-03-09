@@ -4,7 +4,7 @@ import pprint
 import numpy as np
 from datasets import load_dataset, load_metric
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, \
-    Trainer, EarlyStoppingCallback
+    Trainer, EarlyStoppingCallback, DataCollatorWithPadding
 
 import mwep_dataset
 from utils import create_run_folder_and_config_dict
@@ -27,7 +27,7 @@ def news_clf_dataset(config, tokenizer):
 
     # tokenize
     tokenized_dataset = dataset.map(
-        lambda examples: tokenizer(examples['content'], padding='max_length', truncation=True),
+        lambda examples: tokenizer(examples['content'], padding=False, truncation=True),
         batched=True
     ).remove_columns(['content'])
 
@@ -68,7 +68,10 @@ def train_news_clf(config):
         compute_metrics=compute_metrics,
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
-        ]
+        ],
+        data_collator=DataCollatorWithPadding(
+            tokenizer=tokenizer,
+        ),
     )
     if config['continue']:
         trainer.train(resume_from_checkpoint=config['checkpoint'])

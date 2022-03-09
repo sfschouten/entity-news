@@ -96,10 +96,22 @@ class EvenMTDL(MultitaskDataloader):
 class MultitaskTrainer(transformers.Trainer):
 
     def __init__(self, *args, multitask_dataloader_type=SizeProportionalMTDL, **kwargs):
+        """
+        Args:
+            data_collator:
+                dictionary of the form {'eval': ..., 'train': {'task1': ..., 'task2': ...,}}
+        """
+        if 'data_collator' in kwargs:
+            data_collators = kwargs['data_collator']
+            self.train_data_collators = data_collators['train']
+            kwargs['data_collator'] = data_collators['eval']
+        else:
+            print("WARNING: using default collator for each task.")
+
         super().__init__(*args, **kwargs)
         self.multitask_dataloader_type = multitask_dataloader_type
 
-    def get_single_train_dataloader(self, train_dataset):
+    def get_single_train_dataloader(self, task_name, train_dataset):
         """
         Create a single-task data loader that also yields task names
         """
@@ -116,7 +128,7 @@ class MultitaskTrainer(transformers.Trainer):
             train_dataset,
             batch_size=self.args.train_batch_size,
             sampler=train_sampler,
-            collate_fn=self.data_collator,
+            collate_fn=self.train_data_collators[task_name],
         )
         return data_loader
 
@@ -128,7 +140,7 @@ class MultitaskTrainer(transformers.Trainer):
         """
         return self.multitask_dataloader_type(
             {
-                task_name: self.get_single_train_dataloader(task_dataset)
+                task_name: self.get_single_train_dataloader(task_name, task_dataset)
                 for task_name, task_dataset in self.train_dataset.items()
             }
         )

@@ -3,13 +3,16 @@ import pprint
 
 import numpy as np
 from datasets import load_metric
-from transformers import AutoTokenizer, AutoModel, TrainingArguments, EarlyStoppingCallback
+from transformers import AutoTokenizer, AutoModel, TrainingArguments, EarlyStoppingCallback, \
+        DataCollatorWithPadding
+
+from data_collator import DataCollatorForTokenClassification
 
 from modeling_multi_task import create_multitask_class, SequenceClassification, TokenClassification
 from multitask_trainer import MultitaskTrainer, EvenMTDL
 from utils import create_run_folder_and_config_dict
 
-from train_entity_recognition import entity_recognition_dataset, compute_er_metrics
+from train_entity_recognition import kilt_for_er_dataset, compute_er_metrics
 from train_news_clf import news_clf_dataset
 
 
@@ -21,7 +24,7 @@ def train_news_clf(config):
     nc_dataset = news_clf_dataset(config, tokenizer).rename_column('labels', 'nc_labels')
     datasets = {
         "nc": nc_dataset['train'],
-        "er": entity_recognition_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
+        "er": kilt_for_er_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
     }
     tasks = {
         "nc": (0.9, SequenceClassification),
@@ -77,6 +80,16 @@ def train_news_clf(config):
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
         ],
+        data_collator={
+            'eval': DataCollatorWithPadding(tokenizer=tokenizer),
+            'train': {
+                'nc': DataCollatorWithPadding(tokenizer=tokenizer),
+                'er': DataCollatorForTokenClassification(
+                    tokenizer=tokenizer,
+                    label_name='er_labels'
+                )
+            }
+        },
         multitask_dataloader_type=EvenMTDL
     )
     if config['continue']:
@@ -104,6 +117,8 @@ if __name__ == "__main__":
 
     # parser.add_argument('--train_only', action='store_true')
     # parser.add_argument('--eval_only', action='store_true')
+
+    parser.add_argument('--er_dataset_size', default=None, type=int)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
