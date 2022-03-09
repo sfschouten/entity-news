@@ -40,10 +40,13 @@ def kilt_for_er_dataset(config, tokenizer):
         batch_encoding['labels'] = labels
         return batch_encoding
 
+    kwargs = {}
+    if config['er_dataset_size']:
+        kwargs['max_samples'] = config['er_dataset_size']
     dataset = load_dataset(
         el_wiki_dataset.__file__,
         split='full',
-        max_samples=config['er_dataset_size'],
+        **kwargs
     )
 
     # tokenize
@@ -169,7 +172,7 @@ if __name__ == "__main__":
     # parser.add_argument('--train_only', action='store_true')
     # parser.add_argument('--eval_only', action='store_true')
 
-    parser.add_argument('--er_dataset_size', default=1e24, type=int)
+    parser.add_argument('--er_dataset_size', default=None, type=int)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
