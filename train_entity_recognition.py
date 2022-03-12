@@ -16,10 +16,10 @@ I, O, B = 0, 1, 2
 def kilt_for_er_dataset(config, tokenizer):
     def construct_iob_labels(example, batch_encoding: BatchEncoding):
         def warn(s_t, e_t, s_c, e_c):
-            print(f"\nWARNING: NoneType ..."
-                  f"\nwith start_token={s_t}, end_token={e_t} "
-                  f"\nfor start_char={s_c}, end_char={e_c} "
-                  f"\nfor text: {example['mentioning_text']}")
+            print(f"\nWARNING: "
+                  f"\nstart_token={s_t}, end_token={e_t} "
+                  f"\nstart_char={s_c}, end_char={e_c} "
+                  f"\ntext:\n {example['mentioning_text']}")
 
         labels = [O] * len(batch_encoding['input_ids'])
         start_chars = example['mentions']['start_char']
@@ -34,7 +34,7 @@ def kilt_for_er_dataset(config, tokenizer):
                 warn(start_token, end_token, start_char, end_char)
                 continue
             labels[start_token] = B
-            for t in range(start_token + 1, end_token):
+            for t in range(start_token + 1, end_token + 1):
                 labels[t] = I
 
         batch_encoding['labels'] = labels
@@ -68,8 +68,14 @@ def conll2003_dataset(config, tokenizer):
 
     def labels(example, batch_encoding: BatchEncoding):
         words = batch_encoding.words()  # maps tokens to word indices
-        labels = [TAGS[example['ner_tags'][w]][0] if w else 'O' for w in words]
-        labels = [{'I': 0, 'O': 1, 'B': 2}[lbl] for lbl in labels]
+        labels = [TAGS[example['ner_tags'][w]][0] if w is not None else 'O' for w in words]
+        labels = [{'I': I, 'O': O, 'B': B}[lbl] for lbl in labels]
+        # If a word got split up in tokenizer, and had a 'B' tag,
+        # replace second token's tag with 'I'.
+        labels = [labels[0]] + [
+            lbl if not (prev == lbl == B) else I
+            for lbl, prev in zip(labels[1:], labels[0:-1])
+        ]
         batch_encoding['labels'] = labels
         return batch_encoding
 
@@ -83,7 +89,7 @@ def conll2003_dataset(config, tokenizer):
                 truncation=True
             )
         ), batched=False,
-    ).remove_columns(['tokens'])
+    ).remove_columns(['tokens', 'id', 'pos_tags', 'chunk_tags', 'ner_tags'])
     return dataset
 
 
