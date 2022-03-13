@@ -28,8 +28,15 @@ def kilt_for_er_dataset(config, tokenizer):
             if start_char < 0 or end_char < 0:
                 warn(-1, -1, start_char, end_char)
                 continue
-            start_token = batch_encoding.char_to_token(start_char)
-            end_token = batch_encoding.char_to_token(end_char - 1)
+
+            sc, ec = start_char, end_char
+            start_token = end_token = None
+            while start_token is None and sc < end_char:
+                start_token = batch_encoding.char_to_token(sc)
+                sc += 1
+            while end_token is None and ec > start_char:
+                end_token = batch_encoding.char_to_token(ec - 1)
+                ec -= 1
             if start_token is None or end_token is None:
                 warn(start_token, end_token, start_char, end_char)
                 continue
