@@ -171,16 +171,21 @@ def train_entity_linking(config):
             EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
         ]
     )
+
+    if config['probing']:
+        for param in model.base_model.parameters():
+            param.requires_grad = False
+
     if config['continue']:
         trainer.train(resume_from_checkpoint=config['checkpoint'])
     else:
         trainer.train()
 
-    for set in config['test_dataset']:
-        if set == 'kilt':
+    for test_set in config['test_dataset']:
+        if test_set == 'kilt':
             print("Evaluating on KILT wikipedia test split.")
             result = trainer.evaluate(kilt_dataset['test'])
-        if set == 'conll':
+        if test_set == 'conll':
             print("Evaluating on CoNLL2003")
             result = trainer.evaluate(conll_dataset['test'])
         print(result)
@@ -190,24 +195,23 @@ if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--report_to', default=None, type=str)
+
     parser.add_argument('--runs_folder', default='runs')
     parser.add_argument('--run_name', default=None)
 
     parser.add_argument('--model', default="distilbert-base-cased")
+    parser.add_argument('--probing', action='store_true')
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
 
-    # parser.add_argument('--train_only', action='store_true')
-    # parser.add_argument('--eval_only', action='store_true')
-
+    # dataset
     parser.add_argument('--train_dataset', default='kilt', choices=['kilt', 'conll'])
     parser.add_argument('--valid_dataset', default='kilt', choices=['kilt', 'conll'])
     parser.add_argument('--test_dataset', default=['kilt', 'conll'], choices=['kilt', 'conll'], nargs='*')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
-
-    parser.add_argument('--report_to', default=None, type=str)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
