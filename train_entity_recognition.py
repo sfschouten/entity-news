@@ -156,6 +156,7 @@ def train_entity_linking(config):
         load_best_model_at_end=True,
         metric_for_best_model='overall_f1',
         eval_steps=500,
+        report_to=config['report_to'],
     )
     trainer = Trainer(
         model=model,
@@ -202,9 +203,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--train_dataset', default='kilt', choices=['kilt', 'conll'])
     parser.add_argument('--valid_dataset', default='kilt', choices=['kilt', 'conll'])
-    parser.add_argument('--test_dataset', default=['conll'], choices=['kilt', 'conll'], nargs='*')
+    parser.add_argument('--test_dataset', default=['kilt', 'conll'], choices=['kilt', 'conll'], nargs='*')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
+
+    parser.add_argument('--report_to', default=None, type=str)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
