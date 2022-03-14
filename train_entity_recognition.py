@@ -132,6 +132,16 @@ def train_entity_linking(config):
     # conll2003 dataset
     conll_dataset = conll2003_dataset(config, tokenizer)
 
+    if config['train_dataset'] == 'kilt':
+        train_set = kilt_dataset['train']
+    else:
+        train_set = conll_dataset['train']
+
+    if config['valid_dataset'] == 'kilt':
+        valid_set = kilt_dataset['validation']
+    else:
+        valid_set = conll_dataset['validation']
+
     # load model
     model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
 
@@ -146,13 +156,12 @@ def train_entity_linking(config):
         load_best_model_at_end=True,
         metric_for_best_model='overall_f1',
         eval_steps=500,
-        max_steps=1000000,
     )
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=kilt_dataset['train'],
-        eval_dataset=conll_dataset['validation'],
+        train_dataset=train_set,
+        eval_dataset=valid_set,
         compute_metrics=partial(compute_er_metrics, load_metric('seqeval')),
         data_collator=DataCollatorForTokenClassification(
             tokenizer=tokenizer,
@@ -166,8 +175,14 @@ def train_entity_linking(config):
     else:
         trainer.train()
 
-    result = trainer.evaluate(conll_dataset['test'])
-    print(result)
+    for set in config['test_dataset']:
+        if set == 'kilt':
+            print("Evaluating on KILT wikipedia test split.")
+            result = trainer.evaluate(kilt_dataset['test'])
+        if set == 'conll':
+            print("Evaluating on CoNLL2003")
+            result = trainer.evaluate(conll_dataset['test'])
+        print(result)
 
 
 if __name__ == "__main__":
@@ -184,6 +199,10 @@ if __name__ == "__main__":
 
     # parser.add_argument('--train_only', action='store_true')
     # parser.add_argument('--eval_only', action='store_true')
+
+    parser.add_argument('--train_dataset', default='kilt', choices=['kilt', 'conll'])
+    parser.add_argument('--valid_dataset', default='kilt', choices=['kilt', 'conll'])
+    parser.add_argument('--test_dataset', default=['conll'], choices=['kilt', 'conll'], nargs='*')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
 
