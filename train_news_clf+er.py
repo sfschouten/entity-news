@@ -27,8 +27,8 @@ def train_news_clf(config):
         "er": kilt_for_er_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
     }
     tasks = {
-        "nc": (0.9, SequenceClassification),
-        "er": (0.1, TokenClassification),
+        "nc": (0.5, SequenceClassification),
+        "er": (0.5, TokenClassification),
     }
 
     # model and configuration
@@ -69,7 +69,9 @@ def train_news_clf(config):
         metric_for_best_model='accuracy',
         eval_steps=500,
         remove_unused_columns=False,
-        label_names=[f"{key}_labels" for key in datasets.keys()]
+        label_names=[f"{key}_labels" for key in datasets.keys()],
+        report_to=config['report_to'],
+        save_total_limit=5,
     )
     trainer = MultitaskTrainer(
         model=model,
@@ -104,6 +106,9 @@ def train_news_clf(config):
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
+
+    parser.add_argument('--report_to', default=None, type=str)
+
     parser.add_argument('--nc_data_folder', default="../data/minimal/bin")
     parser.add_argument('--mwep_home', default='../mwep')
 

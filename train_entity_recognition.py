@@ -116,7 +116,7 @@ def compute_er_metrics(seq_metric, eval_pred):
     return er_result
 
 
-def train_entity_linking(config):
+def train_entity_recognition(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
 
     # kilt dataset
@@ -157,6 +157,7 @@ def train_entity_linking(config):
         metric_for_best_model='overall_f1',
         eval_steps=500,
         report_to=config['report_to'],
+        save_total_limit=5,
     )
     trainer = Trainer(
         model=model,
@@ -184,10 +185,10 @@ def train_entity_linking(config):
     for test_set in config['test_dataset']:
         if test_set == 'kilt':
             print("Evaluating on KILT wikipedia test split.")
-            result = trainer.evaluate(kilt_dataset['test'])
+            result = trainer.evaluate(kilt_dataset['test'], metric_key_prefix='test_kilt')
         if test_set == 'conll':
             print("Evaluating on CoNLL2003")
-            result = trainer.evaluate(conll_dataset['test'])
+            result = trainer.evaluate(conll_dataset['test'], metric_key_prefix='test_conll')
         print(result)
 
 
@@ -207,9 +208,10 @@ if __name__ == "__main__":
     parser.add_argument('--continue', action='store_true')
 
     # dataset
-    parser.add_argument('--train_dataset', default='kilt', choices=['kilt', 'conll'])
-    parser.add_argument('--valid_dataset', default='kilt', choices=['kilt', 'conll'])
-    parser.add_argument('--test_dataset', default=['kilt', 'conll'], choices=['kilt', 'conll'], nargs='*')
+    parser.add_argument('--train_dataset', choices=['kilt', 'conll'], default='kilt')
+    parser.add_argument('--valid_dataset', choices=['kilt', 'conll'], default='kilt')
+    parser.add_argument('--test_dataset',  choices=['kilt', 'conll'], default=['kilt', 'conll'],
+                        nargs='*')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
 
@@ -223,6 +225,6 @@ if __name__ == "__main__":
     # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
 
     args = parser.parse_args()
-    train_entity_linking(
+    train_entity_recognition(
         create_run_folder_and_config_dict(args)
     )
