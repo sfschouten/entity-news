@@ -76,6 +76,11 @@ def train_news_clf(config):
             tokenizer=tokenizer,
         ),
     )
+
+    if config['probing']:
+        for param in model.base_model.parameters():
+            param.requires_grad = False
+
     if config['continue']:
         trainer.train(resume_from_checkpoint=config['checkpoint'])
     else:
@@ -97,6 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--run_name', default=None)
 
     parser.add_argument('--model', default="distilbert-base-cased")
+    parser.add_argument('--probing', action='store_true')
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')

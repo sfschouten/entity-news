@@ -4,40 +4,55 @@ from functools import partial
 import numpy as np
 
 from datasets import load_dataset, load_metric
-from transformers import AutoTokenizer,  AutoModelForTokenClassification, \
-    TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForTokenClassification
+from transformers import AutoTokenizer, AutoModelForTokenClassification, \
+    TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForTokenClassification, \
+    BatchEncoding
 
 from utils import create_run_folder_and_config_dict
 
-I, O, B = 0, 1, 2
-
 
 def conll2003_dataset(config, tokenizer):
+
+    def labels(example, batch_encoding: BatchEncoding):
+        words = batch_encoding.words()  # maps tokens to word indices
+        labels = [example['ner_tags'][w] if w is not None else 0 for w in words]
+        # only label first token of each word
+        labels = [label if cw != pw else -100
+                  for label, cw, pw in zip(labels[1:], words[1:], words[0:-1])]
+        batch_encoding['labels'] = labels
+        return batch_encoding
+
     dataset = load_dataset("conll2003")
     dataset = dataset.map(
-        lambda example: tokenizer(
-            example['tokens'],
-            is_split_into_words=True,
-            truncation=True
+        lambda example: labels(
+            example,
+            tokenizer(
+                example['tokens'],
+                is_split_into_words=True,
+                truncation=True
+            ),
         ), batched=False,
-    ).rename_column('ner_tags', 'labels').remove_columns(['tokens', 'id', 'pos_tags', 'chunk_tags'])
+    ).remove_columns(['tokens', 'id', 'pos_tags', 'chunk_tags', 'ner_tags'])
     return dataset
 
 
 def compute_er_metrics(seq_metric, eval_pred):
     TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 
-    def swap4lbl(ndarray):
-        return [
-            [TAGS[x.item()] for x in row if x.item() != -100]
-            for row in ndarray
-        ]
-
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
-    labels = swap4lbl(labels)
-    preds = swap4lbl(preds)
-    preds = [pred[:len(lbl)] for pred, lbl in zip(preds, labels)]
+
+    # only take predictions for which we have labels
+    # and swap indices for label strings
+    preds = [
+        [TAGS[pred.item()] for lbl, pred in zip(l_row, p_row) if lbl != -100]
+        for l_row, p_row in zip(labels, preds)
+    ]
+    labels = [
+        [TAGS[label.item()] for label in label_row if label != -100]
+        for label_row in labels
+    ]
+
     er_result = seq_metric.compute(predictions=preds, references=labels, scheme='IOB2')
     return er_result
 
