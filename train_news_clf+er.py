@@ -99,7 +99,7 @@ def train_news_clf(config):
     else:
         trainer.train()
 
-    result = trainer.evaluate(nc_dataset['test'])
+    result = trainer.evaluate(nc_dataset['test'], metric_key_prefix='test')
     pprint.pprint(result)
 
 

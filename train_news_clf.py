@@ -59,6 +59,8 @@ def train_news_clf(config):
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
         eval_steps=500,
+        report_to=config['report_to'],
+        save_total_limit=5,
     )
     trainer = Trainer(
         model=model,
@@ -78,13 +80,15 @@ def train_news_clf(config):
     else:
         trainer.train()
 
-    result = trainer.evaluate(tokenized_dataset['test'])
+    result = trainer.evaluate(tokenized_dataset['test'], metric_key_prefix='test')
     pprint.pprint(result)
 
 
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
+    parser.add_argument('--report_to', default=None, type=str)
+
     parser.add_argument('--nc_data_folder', default="../data/minimal/bin")
 
     parser.add_argument('--mwep_home', default='../mwep')
