@@ -58,7 +58,7 @@ def train_news_clf(config):
         gradient_accumulation_steps=config['gradient_acc_steps'],
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
-        eval_steps=500,
+        eval_steps=config['eval_frequency'],
         report_to=config['report_to'],
         save_total_limit=5,
     )
@@ -102,6 +102,8 @@ if __name__ == "__main__":
 
     # parser.add_argument('--train_only', action='store_true')
     # parser.add_argument('--eval_only', action='store_true')
+
+    parser.add_argument('--eval_frequency', default=500, type=int)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
