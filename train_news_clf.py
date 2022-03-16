@@ -59,6 +59,7 @@ def train_news_clf(config):
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
         eval_steps=config['eval_frequency'],
+        warmup_steps=config['warmup_steps'],
         report_to=config['report_to'],
         save_total_limit=5,
     )
@@ -107,6 +108,7 @@ if __name__ == "__main__":
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
+    parser.add_argument('--warmup_steps', default=2000, type=int)
     parser.add_argument('--early_stopping_patience', default=5, type=int)
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
