@@ -39,9 +39,8 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 "content": datasets.Value("string"),
                 "incident": {
                     "wdt_id": datasets.Value("string"),
-                    # TODO: add back once https://github.com/huggingface/datasets/issues/3631 makes it into a release.
-                    # "incident_type": datasets.ClassLabel(
-                    #    names_file=self.config.mwep_event_types_path),
+                    "incident_type": datasets.ClassLabel(
+                        names_file=self.config.mwep_event_types_path),
                     "incident_type": datasets.ClassLabel(
                         names=['Q350604', 'Q18515440', 'Q669262', 'Q7590']
                     ),
