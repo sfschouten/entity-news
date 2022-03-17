@@ -96,12 +96,24 @@ def train_news_clf(config):
         },
         multitask_dataloader_type=EvenMTDL
     )
-    if config['continue']:
-        trainer.train(resume_from_checkpoint=config['checkpoint'])
-    else:
-        trainer.train()
 
-    result = trainer.evaluate(nc_dataset['test'], metric_key_prefix='test')
+    hidden_state_keys = [f'{task_key}_hidden_states' for task_key in tasks.keys()]
+
+    train_kwargs = {
+        'ignore_keys_for_eval': hidden_state_keys  # prevent OOM during eval
+    }
+    if config['continue']:
+        train_kwargs.update({
+            'resume_from_checkpoint': config['checkpoint']
+        })
+
+    trainer.train(**train_kwargs)
+
+    result = trainer.evaluate(
+        nc_dataset['test'],
+        metric_key_prefix='test',
+        ignore_keys=hidden_state_keys
+    )
     pprint.pprint(result)
 
 
