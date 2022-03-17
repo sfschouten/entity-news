@@ -41,9 +41,6 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                     "wdt_id": datasets.Value("string"),
                     "incident_type": datasets.ClassLabel(
                         names_file=self.config.mwep_event_types_path),
-                    "incident_type": datasets.ClassLabel(
-                        names=['Q350604', 'Q18515440', 'Q669262', 'Q7590']
-                    ),
                     "extra_info": {
                         "sem:hasPlace": datasets.Value("string"),
                         "sem:hasTimeStamp": datasets.Value("string")
