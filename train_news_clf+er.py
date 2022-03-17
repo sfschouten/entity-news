@@ -36,6 +36,7 @@ def train_news_clf(config):
     base_model.config.update({
         'nc_num_labels': 4,
         'er_num_labels': 3,
+        'er_attach_layer': config['er_attach_layer'],
     })
     cls = create_multitask_class(type(base_model))
     model = cls(base_model, tasks.items())
@@ -117,6 +118,7 @@ if __name__ == "__main__":
     parser.add_argument('--run_name', default=None)
 
     parser.add_argument('--model', default="distilbert-base-cased")
+    parser.add_argument('--er_attach_layer', default=-1, type=int)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
