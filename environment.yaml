@@ -2,13 +2,14 @@ channels:
   - defaults
   - conda-forge
   - pytorch
+  - nvidia
 dependencies:
-  - python=3.9
-  - pytorch>=1.10
-  - cudatoolkit=11.3
-  - transformers=4.16.2
-  - datasets>=1.18
-  - rdflib
-  - scipy
-  - scikit-learn
-  - seqeval
+  - defaults::python=3.9
+  - pytorch::pytorch=1.10
+  - nvidia::cudatoolkit=11.3
+  - conda-forge::transformers=4.16
+  - conda-forge::datasets=1.18
+  - conda-forge::rdflib
+  - conda-forge::scipy
+  - conda-forge::scikit-learn
+  - conda-forge::seqeval
