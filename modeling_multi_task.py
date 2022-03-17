@@ -28,10 +28,9 @@ class TokenClassification(Task):
 
     def __init__(self, key, config):
         super().__init__(key, config)
-        if f'{key}_num_labels' in config.to_dict():
-            self.num_labels = config.to_dict()[f'{key}_num_labels']
-        else:
-            self.num_labels = config.num_labels
+        config_dict = config.to_dict()
+        self.num_labels = config_dict.get(f'{key}_num_labels', config.num_labels)
+        self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
         self.dropout = nn.Dropout(config.dropout)
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
@@ -45,7 +44,7 @@ class TokenClassification(Task):
         labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        sequence_output = base_outputs[0]
+        sequence_output = base_outputs[1][self.attach_layer]
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
@@ -70,10 +69,9 @@ class SequenceClassification(Task):
 
     def __init__(self, key, config):
         super().__init__(key, config)
-        if f'{key}_num_labels' in config.to_dict():
-            self.num_labels = config.to_dict()[f'{key}_num_labels']
-        else:
-            self.num_labels = config.num_labels
+        config_dict = config.to_dict()
+        self.num_labels = config_dict.get(f'{key}_num_labels', config.num_labels)
+        self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
         self.dropout = nn.Dropout(config.dropout)
         self.pre_classifier = nn.Linear(config.dim, config.dim)
@@ -88,7 +86,7 @@ class SequenceClassification(Task):
         labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        hidden_state = base_outputs[0]                          # (bs, seq_len, dim)
+        hidden_state = base_outputs[1][self.attach_layer]       # (bs, seq_len, dim)
         pooled_output = hidden_state[:, 0]                      # (bs, dim)
         pooled_output = self.pre_classifier(pooled_output)      # (bs, dim)
         pooled_output = nn.ReLU()(pooled_output)                # (bs, dim)
@@ -160,7 +158,7 @@ def create_multitask_class(model_cls: Type[T]):
             task_args = {key: task.extract_kwargs(kwargs) for key, task in self.tasks.items()}
 
             # now forward the underlying transformer model
-            outputs = self.transformer_model(**kwargs)
+            outputs = self.transformer_model(**kwargs, output_hidden_states=True)
 
             # finally, forward the task-specific heads, passing the arguments extracted before
             all_results = {key: task(outputs, *task_args[key]) for key, task in self.tasks.items()}

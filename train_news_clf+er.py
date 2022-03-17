@@ -35,7 +35,7 @@ def train_news_clf(config):
     base_model = AutoModel.from_pretrained(config['model'])
     base_model.config.update({
         'nc_num_labels': 4,
-        'er_num_labels': 3
+        'er_num_labels': 3,
     })
     cls = create_multitask_class(type(base_model))
     model = cls(base_model, tasks.items())
