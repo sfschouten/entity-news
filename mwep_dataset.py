@@ -15,6 +15,7 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
     mwep_event_types_path: str = None
 
     split_level: str = 'incident'
+    eval_split_size: int = 500
 
     def __post_init__(self):
         if self.mwep_path is None:
@@ -23,12 +24,11 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
         self.mwep_cls_mod_loc = os.path.join(self.mwep_path)
 
         if self.mwep_event_types_path is None:
-            self.mwep_event_types_path = os.path.join(self.mwep_path, "config/event_types.txt")
+            self.mwep_event_types_path = os.path.join(self.data_dir, 'event_types.txt')
 
 
 class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
     BUILDER_CONFIG_CLASS = MWEPBuilderConfig
-    EVAL_SPLITS_SIZE = 500
     RANDOM_SEED = 19930729
 
     def _info(self) -> DatasetInfo:
@@ -65,7 +65,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
             data_dir = None
             raise NotImplementedError()
         else:
-            data_dir = self.config.data_dir
+            data_dir = os.path.join(self.config.data_dir, 'bin/')
 
         # load data
         self.collections_by_file = {}
@@ -89,11 +89,13 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 for txt_i, _ in enumerate(inc.reference_texts)
             )
 
+            eval_split_size = self.config.eval_split_size
+
             def article_level_split():
                 nonlocal c_idxs
-                c_test_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
+                c_test_idxs = random.sample(c_idxs, eval_split_size)
                 c_idxs -= set(c_test_idxs)
-                c_valid_idxs = random.sample(c_idxs, self.EVAL_SPLITS_SIZE)
+                c_valid_idxs = random.sample(c_idxs, eval_split_size)
                 c_idxs -= set(c_valid_idxs)
 
                 train_idxs.update(c_idxs)
@@ -107,7 +109,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
                 def split_off_eval():
                     c_eval_idxs = set()
-                    while len(c_eval_idxs) < self.EVAL_SPLITS_SIZE:
+                    while len(c_eval_idxs) < eval_split_size:
                         to_add = c_inc_idxs.pop()
                         c_eval_idxs.update(set(
                             (f, inc_i, txt_i) for (f, inc_i, txt_i) in c_idxs if inc_i == to_add
