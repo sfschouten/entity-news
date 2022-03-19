@@ -39,17 +39,17 @@ def news_clf_dataset(config, tokenizer):
         nonlocal nr_classes
         nr_classes = max(nr_classes, x['labels'] + 1)
     tokenized_dataset.map(calc_nr_labels)
-    tokenized_dataset['num_classes'] = nr_classes
-    return tokenized_dataset
+
+    return tokenized_dataset, nr_classes
 
 
 def train_news_clf(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
-    tokenized_dataset = news_clf_dataset(config, tokenizer)
+    tokenized_dataset, nr_classes = news_clf_dataset(config, tokenizer)
 
     # load model & metric
     model = AutoModelForSequenceClassification.from_pretrained(
-        config['model'], num_labels=tokenized_dataset['num_classes']
+        config['model'], num_labels=nr_classes
     )
     acc_metric = load_metric('accuracy')
 

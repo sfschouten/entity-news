@@ -21,7 +21,8 @@ def train_news_clf(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
 
     # collect datasets and corresponding tasks
-    nc_dataset = news_clf_dataset(config, tokenizer).rename_column('labels', 'nc_labels')
+    nc_dataset, nc_nr_classes = news_clf_dataset(config, tokenizer)
+    nc_dataset = nc_dataset.rename_column('labels', 'nc_labels')
     datasets = {
         "nc": nc_dataset['train'],
         "er": kilt_for_er_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
@@ -34,7 +35,7 @@ def train_news_clf(config):
     # model and configuration
     base_model = AutoModel.from_pretrained(config['model'])
     base_model.config.update({
-        'nc_num_labels': 4,
+        'nc_num_labels': nc_nr_classes,
         'er_num_labels': 3,
         'er_attach_layer': config['er_attach_layer'],
     })
@@ -123,7 +124,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--report_to', default=None, type=str)
 
-    parser.add_argument('--nc_data_folder', default="../data/minimal/bin")
+    parser.add_argument('--nc_data_folder', default="../data/minimal")
+    parser.add_argument('--nc_eval_split_size', default=500, type=int)
     parser.add_argument('--mwep_home', default='../mwep')
 
     parser.add_argument('--runs_folder', default='runs')
