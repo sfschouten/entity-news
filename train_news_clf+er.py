@@ -62,7 +62,6 @@ def train_news_clf(config):
     training_args = TrainingArguments(
         config['run_path'],
         fp16=True,
-        evaluation_strategy="steps",
         num_train_epochs=config['max_nr_epochs'],
         per_device_train_batch_size=config['batch_size_train'],
         per_device_eval_batch_size=config['batch_size_eval'],
@@ -71,6 +70,7 @@ def train_news_clf(config):
         metric_for_best_model='accuracy',
         remove_unused_columns=False,
         label_names=[f"{key}_labels" for key in datasets.keys()],
+        evaluation_strategy=config['eval_strategy'],
         eval_steps=config['eval_frequency'],
         warmup_steps=config['warmup_steps'],
         report_to=config['report_to'],
@@ -142,6 +142,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
 
+    parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
 
     # hyper-parameters
