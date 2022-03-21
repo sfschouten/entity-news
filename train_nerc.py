@@ -76,6 +76,7 @@ def train_entity_recognition(config):
         load_best_model_at_end=True,
         metric_for_best_model='overall_f1',
         evaluation_strategy=config['eval_strategy'],
+        save_strategy=config['eval_strategy'],
         eval_steps=config['eval_frequency'],
         warmup_steps=config['warmup_steps'],
         report_to=config['report_to'],

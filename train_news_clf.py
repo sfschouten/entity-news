@@ -69,6 +69,7 @@ def train_news_clf(config):
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
         evaluation_strategy=config['eval_strategy'],
+        save_strategy=config['eval_strategy'],
         eval_steps=config['eval_frequency'],
         warmup_steps=config['warmup_steps'],
         report_to=config['report_to'],
