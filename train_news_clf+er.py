@@ -58,6 +58,8 @@ def train_news_clf(config):
     acc_metric = load_metric('accuracy')
     seq_metric = load_metric('seqeval')
 
+    wandb.init(project='entity-news', tags=['news_clf+er'])
+
     def compute_metrics(eval_pred):
         (nc_logits, er_logits), (nc_labels, er_labels) = eval_pred
         results = {}

@@ -51,6 +51,8 @@ def train_news_clf(config):
     )
     acc_metric = load_metric('accuracy')
 
+    wandb.init(project='entity-news', tags=['news_clf'])
+
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
