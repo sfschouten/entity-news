@@ -9,6 +9,8 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trai
 import mwep_dataset
 from utils import create_run_folder_and_config_dict
 
+from sklearn import metrics
+
 
 def news_clf_dataset(config, tokenizer):
     # dataset processing/loading
@@ -16,7 +18,9 @@ def news_clf_dataset(config, tokenizer):
         mwep_dataset.__file__,
         data_dir=config['nc_data_folder'],
         mwep_path=config['mwep_home'],
-    ).flatten().remove_columns(
+    )
+
+    dataset = dataset.flatten().remove_columns(
         [
             'uri',
             'incident.extra_info.sem:hasPlace',
@@ -31,30 +35,25 @@ def news_clf_dataset(config, tokenizer):
         batched=True
     ).remove_columns(['content'])
 
-    # count number of classes
-    nr_classes = -1
-
-    def calc_nr_labels(x):
-        nonlocal nr_classes
-        nr_classes = max(nr_classes, x['labels'] + 1)
-    tokenized_dataset.map(calc_nr_labels)
-
-    return tokenized_dataset, nr_classes
+    return tokenized_dataset
 
 
 def train_news_clf(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
-    tokenized_dataset, nr_classes = news_clf_dataset(config, tokenizer)
+    tokenized_dataset = news_clf_dataset(config, tokenizer)
+    class_names = tokenized_dataset['train'].features['labels'].names
 
     # load model & metric
     model = AutoModelForSequenceClassification.from_pretrained(
-        config['model'], num_labels=nr_classes
+        config['model'], num_labels=len(class_names)
     )
     acc_metric = load_metric('accuracy')
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
+        print(metrics.classification_report(labels, preds, target_names=class_names))
+        print(metrics.confusion_matrix(labels, preds, ))
         return acc_metric.compute(predictions=preds, references=labels)
 
     # training
@@ -92,10 +91,11 @@ def train_news_clf(config):
         for param in model.base_model.parameters():
             param.requires_grad = False
 
-    if config['continue']:
-        trainer.train(resume_from_checkpoint=config['checkpoint'])
-    else:
-        trainer.train()
+    if not config['eval_only']:
+        if config['continue']:
+            trainer.train(resume_from_checkpoint=config['checkpoint'])
+        else:
+            trainer.train()
 
     result = trainer.evaluate(tokenized_dataset['test'], metric_key_prefix='test')
     pprint.pprint(result)
@@ -117,9 +117,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
-
-    # parser.add_argument('--train_only', action='store_true')
-    # parser.add_argument('--eval_only', action='store_true')
+    parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)

@@ -15,27 +15,29 @@ from utils import create_run_folder_and_config_dict
 from train_entity_recognition import kilt_for_er_dataset, compute_er_metrics
 from train_news_clf import news_clf_dataset
 
+from sklearn import metrics
 
 def train_news_clf(config):
 
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
 
     # collect datasets and corresponding tasks
-    nc_dataset, nc_nr_classes = news_clf_dataset(config, tokenizer)
+    nc_dataset = news_clf_dataset(config, tokenizer)
+    nc_class_names = nc_dataset['train'].features['labels'].names
     nc_dataset = nc_dataset.rename_column('labels', 'nc_labels')
     datasets = {
         "nc": nc_dataset['train'],
         "er": kilt_for_er_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
     }
     tasks = {
-        "nc": (0.5, SequenceClassification),
-        "er": (0.5, TokenClassification),
+        "nc": (1., SequenceClassification),
+        "er": (1., TokenClassification),
     }
 
     # model and configuration
     base_model = AutoModel.from_pretrained(config['model'])
     base_model.config.update({
-        'nc_num_labels': nc_nr_classes,
+        'nc_num_labels': len(nc_class_names),
         'er_num_labels': 3,
         'er_attach_layer': config['er_attach_layer'],
     })
@@ -48,15 +50,17 @@ def train_news_clf(config):
 
     def compute_metrics(eval_pred):
         (nc_logits, er_logits), (nc_labels, er_labels) = eval_pred
-        metrics = {}
+        results = {}
         if not (er_labels == -1).all():
             er_metrics = compute_er_metrics(seq_metric, (er_logits, er_labels))
-            metrics.update(er_metrics)
+            results.update(er_metrics)
         if not (nc_labels == -1).all():
             preds = np.argmax(nc_logits, axis=-1)
             nc_acc = acc_metric.compute(predictions=preds, references=nc_labels)
-            metrics.update(nc_acc)
-        return metrics
+            results.update(nc_acc)
+            print(metrics.classification_report(nc_labels, preds, target_names=nc_class_names))
+            print(metrics.confusion_matrix(nc_labels, preds, ))
+        return results
 
     # training
     training_args = TrainingArguments(
@@ -109,7 +113,8 @@ def train_news_clf(config):
             'resume_from_checkpoint': config['checkpoint']
         })
 
-    trainer.train(**train_kwargs)
+    if not config['eval_only']:
+        trainer.train(**train_kwargs)
 
     result = trainer.evaluate(
         nc_dataset['test'],
@@ -136,9 +141,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
-
-    # parser.add_argument('--train_only', action='store_true')
-    # parser.add_argument('--eval_only', action='store_true')
+    parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
 
