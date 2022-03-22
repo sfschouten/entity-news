@@ -11,6 +11,8 @@ from utils import create_run_folder_and_config_dict
 
 from sklearn import metrics
 
+import wandb
+
 
 def news_clf_dataset(config, tokenizer):
     # dataset processing/loading
@@ -53,7 +55,10 @@ def train_news_clf(config):
         logits, labels = eval_pred
         preds = np.argmax(logits, axis=-1)
         print(metrics.classification_report(labels, preds, target_names=class_names))
-        print(metrics.confusion_matrix(labels, preds, ))
+        print(metrics.confusion_matrix(labels, preds))
+        wandb.log({"conf_mat": wandb.plot.confusion_matrix(probs=None,
+                                                           y_true=labels, preds=preds,
+                                                           class_names=class_names)})
         return acc_metric.compute(predictions=preds, references=labels)
 
     # training

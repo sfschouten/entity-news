@@ -19,8 +19,10 @@ from train_news_clf import news_clf_dataset
 
 from sklearn import metrics
 
-def train_news_clf(config):
+import wandb
 
+
+def train_news_clf(config):
     tokenizer = AutoTokenizer.from_pretrained(config['model'])
 
     # collect datasets and corresponding tasks
@@ -67,7 +69,10 @@ def train_news_clf(config):
             nc_acc = acc_metric.compute(predictions=preds, references=nc_labels)
             results.update(nc_acc)
             print(metrics.classification_report(nc_labels, preds, target_names=nc_class_names))
-            print(metrics.confusion_matrix(nc_labels, preds, ))
+            print(metrics.confusion_matrix(nc_labels, preds))
+            wandb.log({"conf_mat": wandb.plot.confusion_matrix(probs=None,
+                                                               y_true=nc_labels, preds=preds,
+                                                               class_names=nc_class_names)})
         return results
 
     # training
