@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import FloatTensor
 from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
 
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, PretrainedConfig
 from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput
 from transformers.file_utils import ModelOutput
 
@@ -140,12 +140,11 @@ def create_multitask_class(model_cls: Type[T]):
 
     class ModelForMultipleTasks(model_cls):
 
-        def __init__(self, transformer_model: model_cls,
+        def __init__(self, config: PretrainedConfig,
                      tasks: List[Tuple[str, float, Type[Task]]]):
-            config = transformer_model.config
             super().__init__(config)
 
-            self.transformer_model = transformer_model
+            self.transformer_model = model_cls(config)
 
             self.loss_weights = {key: weight for key, (weight, _) in tasks}
             self.normalizer = sum(self.loss_weights.values())

@@ -4,7 +4,9 @@ import pprint
 import numpy as np
 from datasets import load_metric
 from transformers import AutoTokenizer, AutoModel, TrainingArguments, EarlyStoppingCallback, \
-        DataCollatorWithPadding
+    DataCollatorWithPadding, AutoConfig
+
+from transformers.models.auto.auto_factory import _get_model_class
 
 from data_collator import DataCollatorForTokenClassification
 
@@ -34,15 +36,21 @@ def train_news_clf(config):
         "er": (1., TokenClassification),
     }
 
+    base_config = AutoConfig.from_pretrained(config['model'])
+    base_model_cls = _get_model_class(base_config, AutoModel._model_mapping)
+
     # model and configuration
-    base_model = AutoModel.from_pretrained(config['model'])
-    base_model.config.update({
-        'nc_num_labels': len(nc_class_names),
-        'er_num_labels': 3,
-        'er_attach_layer': config['er_attach_layer'],
-    })
-    cls = create_multitask_class(type(base_model))
-    model = cls(base_model, tasks.items())
+    if config['checkpoint'] is not None:
+        cls = create_multitask_class(base_model_cls)
+        model = cls.from_pretrained(config['checkpoint'], tasks.items())
+    else:
+        base_config.update({
+            'nc_num_labels': len(nc_class_names),
+            'er_num_labels': 3,
+            'er_attach_layer': config['er_attach_layer'],
+        })
+        cls = create_multitask_class(base_model_cls)
+        model = cls(base_config, tasks.items())
 
     # metric
     acc_metric = load_metric('accuracy')
