@@ -16,7 +16,6 @@ def news_clf_dataset(config, tokenizer):
         mwep_dataset.__file__,
         data_dir=config['nc_data_folder'],
         mwep_path=config['mwep_home'],
-        eval_split_size=config['nc_eval_split_size'],
     ).flatten().remove_columns(
         [
             'uri',
@@ -108,7 +107,6 @@ if __name__ == "__main__":
     parser.add_argument('--report_to', default=None, type=str)
 
     parser.add_argument('--nc_data_folder', default="../data/minimal")
-    parser.add_argument('--nc_eval_split_size', default=500, type=int)
 
     parser.add_argument('--mwep_home', default='../mwep')
     parser.add_argument('--runs_folder', default='runs')

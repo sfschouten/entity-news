@@ -15,7 +15,8 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
     mwep_event_types_path: str = None
 
     split_level: str = 'incident'
-    eval_split_size: int = 500
+    eval_split_size_abs: int = None
+    eval_split_size_rel: float = 0.1
 
     def __post_init__(self):
         if self.mwep_path is None:
@@ -89,7 +90,15 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 for txt_i, _ in enumerate(inc.reference_texts)
             )
 
-            eval_split_size = self.config.eval_split_size
+            if self.config.eval_split_size_abs is not None:
+                eval_split_size = self.config.eval_split_size_abs
+            elif self.config.eval_split_size_rel is not None:
+                eval_split_size = int(self.config.eval_split_size_rel * len(c_idxs))
+            else:
+                raise ValueError('Either an absolute or relative split size must be specified.')
+
+            print(f"For {file} we have {len(c_idxs)} incidents, targeting eval split size of "
+                  f"at least {eval_split_size}")
 
             def article_level_split():
                 nonlocal c_idxs
@@ -117,8 +126,11 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                     return c_eval_idxs
 
                 # split off validation and test sets
-                valid_idxs.update(split_off_eval())
-                test_idxs.update(split_off_eval())
+                v = split_off_eval()
+                t = split_off_eval()
+                print(f'The valid/test split sizes for this incident are: {len(v)}/{len(t)}.')
+                valid_idxs.update(v)
+                test_idxs.update(t)
 
                 # add rest as training
                 c_inc_idxs = set(c_inc_idxs)
@@ -130,6 +142,13 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 article_level_split()
             elif self.config.split_level == 'incident':
                 incident_level_split()
+            elif self.config.split_level == 'none':
+                return [
+                    datasets.SplitGenerator(
+                        name='full',
+                        gen_kwargs={'idxs': c_idxs}
+                    )
+                ]
             else:
                 raise ValueError('Invalid split_level!')
 
@@ -171,8 +190,10 @@ if __name__ == "__main__":
     # load a dataset
     dataset = load_dataset(
         __file__,
-        data_dir="../data/minimal/bin",
+        data_dir="../data/minimal",
         mwep_path="../mwep",
+        split_level='incident',
+        eval_split_size_rel=0.1,
     )
 
     # print some samples
