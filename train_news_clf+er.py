@@ -72,9 +72,9 @@ def train_news_clf(config):
             results.update(nc_acc)
             print(metrics.classification_report(nc_labels, preds, target_names=nc_class_names))
             print(metrics.confusion_matrix(nc_labels, preds))
-            wandb.log({"conf_mat": wandb.plot.confusion_matrix(probs=None,
-                                                               y_true=nc_labels, preds=preds,
-                                                               class_names=nc_class_names)})
+            wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(probs=None,
+                                                                  y_true=nc_labels, preds=preds,
+                                                                  class_names=nc_class_names)})
         return results
 
     # training

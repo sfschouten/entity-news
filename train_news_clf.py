@@ -46,9 +46,14 @@ def train_news_clf(config):
     class_names = tokenized_dataset['train'].features['labels'].names
 
     # load model & metric
-    model = AutoModelForSequenceClassification.from_pretrained(
-        config['model'], num_labels=len(class_names)
-    )
+    if config['checkpoint'] is not None:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            config['checkpoint'], num_labels=len(class_names)
+        )
+    else:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            config['model'], num_labels=len(class_names)
+        )
     acc_metric = load_metric('accuracy')
 
     wandb.init(project='entity-news', tags=['news_clf'])
@@ -58,9 +63,9 @@ def train_news_clf(config):
         preds = np.argmax(logits, axis=-1)
         print(metrics.classification_report(labels, preds, target_names=class_names))
         print(metrics.confusion_matrix(labels, preds))
-        wandb.log({"conf_mat": wandb.plot.confusion_matrix(probs=None,
-                                                           y_true=labels, preds=preds,
-                                                           class_names=class_names)})
+        wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(probs=None,
+                                                              y_true=labels, preds=preds,
+                                                              class_names=class_names)})
         return acc_metric.compute(predictions=preds, references=labels)
 
     # training
