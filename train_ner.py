@@ -2,12 +2,15 @@ import argparse
 from functools import partial
 
 import numpy as np
+import wandb
 
 from datasets import load_dataset, load_metric, DatasetDict
-from transformers import AutoTokenizer, BatchEncoding, AutoModelForTokenClassification, \
-    TrainingArguments, Trainer, EarlyStoppingCallback, DataCollatorForTokenClassification
+from transformers import AutoTokenizer, BatchEncoding, \
+    TrainingArguments, Trainer, EarlyStoppingCallback
 
-from utils import create_run_folder_and_config_dict
+from data_collator import DataCollatorForTokenClassification
+from modeling_versatile import TokenClassification
+from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 import el_wiki_dataset
 
 I, O, B = 0, 1, 2
@@ -100,7 +103,7 @@ def conll2003_dataset(config, tokenizer):
     return dataset
 
 
-def compute_er_metrics(seq_metric, eval_pred):
+def compute_ner_metrics(seq_metric, eval_pred):
     def swap4lbl(ndarray):
         return [
             [{I: 'I', O: 'O', B: 'B'}[x.item()] for x in row if x.item() != -100]
@@ -116,11 +119,13 @@ def compute_er_metrics(seq_metric, eval_pred):
     return er_result
 
 
-def train_entity_recognition(config):
-    tokenizer = AutoTokenizer.from_pretrained(config['model'])
+def train_entity_recognition(cli_config):
+    wandb.init(project='entity-news', tags=['NER'])
+
+    tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
     # kilt dataset
-    kilt_dataset = kilt_for_er_dataset(config, tokenizer)
+    kilt_dataset = kilt_for_er_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
     train_eval = kilt_dataset.train_test_split(test_size=0.01)
     valid_test = train_eval['test'].train_test_split(test_size=0.5)
     kilt_dataset = DatasetDict({
@@ -130,35 +135,44 @@ def train_entity_recognition(config):
     })
 
     # conll2003 dataset
-    conll_dataset = conll2003_dataset(config, tokenizer)
+    conll_dataset = conll2003_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
 
-    if config['train_dataset'] == 'kilt':
+    if cli_config['train_dataset'] == 'kilt':
         train_set = kilt_dataset['train']
     else:
         train_set = conll_dataset['train']
 
-    if config['valid_dataset'] == 'kilt':
+    if cli_config['valid_dataset'] == 'kilt':
         valid_set = kilt_dataset['validation']
     else:
         valid_set = conll_dataset['validation']
 
     # load model
-    model = AutoModelForTokenClassification.from_pretrained(config['model'], num_labels=3)
+    heads = {"ner-0": (1., TokenClassification)}
+    model = create_or_load_versatile_model(
+        cli_config, {
+            'ner-0_num_labels': 3,
+            'ner-0_attach_layer': cli_config['head_attach_layer'],
+        },
+        heads
+    )
 
     training_args = TrainingArguments(
-        config['run_path'],
+        cli_config['run_path'],
         fp16=True,
-        num_train_epochs=config['max_nr_epochs'],
-        per_device_train_batch_size=config['batch_size_train'],
-        per_device_eval_batch_size=config['batch_size_eval'],
-        gradient_accumulation_steps=config['gradient_acc_steps'],
+        num_train_epochs=cli_config['max_nr_epochs'],
+        per_device_train_batch_size=cli_config['batch_size_train'],
+        per_device_eval_batch_size=cli_config['batch_size_eval'],
+        gradient_accumulation_steps=cli_config['gradient_acc_steps'],
         load_best_model_at_end=True,
+        remove_unused_columns=False,
+        label_names=["ner_labels"],
         metric_for_best_model='overall_f1',
-        evaluation_strategy=config['eval_strategy'],
-        save_strategy=config['eval_strategy'],
-        eval_steps=config['eval_frequency'],
-        warmup_steps=config['warmup_steps'],
-        report_to=config['report_to'],
+        evaluation_strategy=cli_config['eval_strategy'],
+        save_strategy=cli_config['eval_strategy'],
+        eval_steps=cli_config['eval_frequency'],
+        warmup_steps=cli_config['warmup_steps'],
+        report_to=cli_config['report_to'],
         save_total_limit=5,
     )
     trainer = Trainer(
@@ -166,32 +180,43 @@ def train_entity_recognition(config):
         args=training_args,
         train_dataset=train_set,
         eval_dataset=valid_set,
-        compute_metrics=partial(compute_er_metrics, load_metric('seqeval')),
+        compute_metrics=partial(compute_ner_metrics, load_metric('seqeval')),
         data_collator=DataCollatorForTokenClassification(
             tokenizer=tokenizer,
+            label_name='ner_labels'
         ),
         callbacks=[
-            EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
+            EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ]
     )
 
-    if config['probing']:
+    if cli_config['probing']:
         for param in model.base_model.parameters():
             param.requires_grad = False
 
-    if config['continue']:
-        trainer.train(resume_from_checkpoint=config['checkpoint'])
-    else:
-        trainer.train()
+    # ignore hidden states in output, prevent OOM during eval
+    hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
-    for test_set in config['test_dataset']:
+    train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
+
+    for test_set in cli_config['test_dataset']:
         if test_set == 'kilt':
             print("Evaluating on KILT wikipedia test split.")
-            result = trainer.evaluate(kilt_dataset['test'], metric_key_prefix='test_kilt')
+            result = trainer.evaluate(
+                kilt_dataset['test'],
+                metric_key_prefix='test_kilt',
+                ignore_keys=hidden_state_keys,
+            )
+            print(result)
+
         if test_set == 'conll':
             print("Evaluating on CoNLL2003")
-            result = trainer.evaluate(conll_dataset['test'], metric_key_prefix='test_conll')
-        print(result)
+            result = trainer.evaluate(
+                conll_dataset['test'],
+                metric_key_prefix='test_conll',
+                ignore_keys=hidden_state_keys,
+            )
+            print(result)
 
 
 if __name__ == "__main__":
@@ -205,9 +230,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
+    parser.add_argument('--head_attach_layer', default=-1, type=int)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
+    parser.add_argument('--eval_only', action='store_true')
 
     # dataset
     parser.add_argument('--train_dataset', choices=['kilt', 'conll'], default='kilt')
@@ -227,8 +254,6 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
-    # parser.add_argument('--learning_rate_base', default=1e-4, type=float)
-    # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
 
     args = parser.parse_args()
     train_entity_recognition(

@@ -3,18 +3,16 @@ import pprint
 
 import numpy as np
 from datasets import load_metric
-from transformers import AutoTokenizer, AutoModel, TrainingArguments, EarlyStoppingCallback, \
-    DataCollatorWithPadding, AutoConfig
-
-from transformers.models.auto.auto_factory import _get_model_class
+from transformers import AutoTokenizer, TrainingArguments, EarlyStoppingCallback, \
+    DataCollatorWithPadding
 
 from data_collator import DataCollatorForTokenClassification
 
-from modeling_multi_task import create_multitask_class, SequenceClassification, TokenClassification
+from modeling_versatile import SequenceClassification, TokenClassification
 from multitask_trainer import MultitaskTrainer, EvenMTDL
-from utils import create_run_folder_and_config_dict
+from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
-from train_ner import kilt_for_er_dataset, compute_er_metrics
+from train_ner import kilt_for_er_dataset, compute_ner_metrics
 from train_news_clf import news_clf_dataset
 
 from sklearn import metrics
@@ -22,49 +20,44 @@ from sklearn import metrics
 import wandb
 
 
-def train_news_clf(config):
-    tokenizer = AutoTokenizer.from_pretrained(config['model'])
+def train_news_clf(cli_config):
+    wandb.init(project='entity-news', tags=['NewsCLF+NER'])
 
-    # collect datasets and corresponding tasks
-    nc_dataset = news_clf_dataset(config, tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
+
+    # collect datasets
+    nc_dataset = news_clf_dataset(cli_config, tokenizer)
     nc_class_names = nc_dataset['train'].features['labels'].names
     nc_dataset = nc_dataset.rename_column('labels', 'nc_labels')
     datasets = {
         "nc": nc_dataset['train'],
-        "er": kilt_for_er_dataset(config, tokenizer).rename_column('labels', 'er_labels'),
-    }
-    tasks = {
-        "nc": (1., SequenceClassification),
-        "er": (1., TokenClassification),
+        "er": kilt_for_er_dataset(cli_config, tokenizer).rename_column('labels', 'er_labels'),
     }
 
-    base_config = AutoConfig.from_pretrained(config['model'])
-    base_model_cls = _get_model_class(base_config, AutoModel._model_mapping)
-
-    # model and configuration
-    if config['checkpoint'] is not None:
-        cls = create_multitask_class(base_model_cls)
-        model = cls.from_pretrained(config['checkpoint'], tasks.items())
-    else:
-        base_config.update({
-            'nc_num_labels': len(nc_class_names),
-            'er_num_labels': 3,
-            'er_attach_layer': config['er_attach_layer'],
-        })
-        cls = create_multitask_class(base_model_cls)
-        model = cls(base_config, tasks.items())
+    # model
+    heads = {
+        "nc-0": (1., SequenceClassification),
+        "er-0": (1., TokenClassification),
+    }
+    model = create_or_load_versatile_model(
+        cli_config,
+        {
+            'nc-0_num_labels': len(nc_class_names),
+            'er-0_num_labels': 3,
+            'er-0_attach_layer': cli_config['er_attach_layer'],
+        },
+        heads
+    )
 
     # metric
     acc_metric = load_metric('accuracy')
     seq_metric = load_metric('seqeval')
 
-    wandb.init(project='entity-news', tags=['news_clf+er'])
-
     def compute_metrics(eval_pred):
         (nc_logits, er_logits), (nc_labels, er_labels) = eval_pred
         results = {}
         if not (er_labels == -1).all():
-            er_metrics = compute_er_metrics(seq_metric, (er_logits, er_labels))
+            er_metrics = compute_ner_metrics(seq_metric, (er_logits, er_labels))
             results.update(er_metrics)
         if not (nc_labels == -1).all():
             preds = np.argmax(nc_logits, axis=-1)
@@ -72,28 +65,27 @@ def train_news_clf(config):
             results.update(nc_acc)
             print(metrics.classification_report(nc_labels, preds, target_names=nc_class_names))
             print(metrics.confusion_matrix(nc_labels, preds))
-            wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(probs=None,
-                                                                  y_true=nc_labels, preds=preds,
+            wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(y_true=nc_labels, preds=preds,
                                                                   class_names=nc_class_names)})
         return results
 
     # training
     training_args = TrainingArguments(
-        config['run_path'],
+        cli_config['run_path'],
         fp16=True,
-        num_train_epochs=config['max_nr_epochs'],
-        per_device_train_batch_size=config['batch_size_train'],
-        per_device_eval_batch_size=config['batch_size_eval'],
-        gradient_accumulation_steps=config['gradient_acc_steps'],
+        num_train_epochs=cli_config['max_nr_epochs'],
+        per_device_train_batch_size=cli_config['batch_size_train'],
+        per_device_eval_batch_size=cli_config['batch_size_eval'],
+        gradient_accumulation_steps=cli_config['gradient_acc_steps'],
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
         remove_unused_columns=False,
         label_names=[f"{key}_labels" for key in datasets.keys()],
-        evaluation_strategy=config['eval_strategy'],
-        save_strategy=config['eval_strategy'],
-        eval_steps=config['eval_frequency'],
-        warmup_steps=config['warmup_steps'],
-        report_to=config['report_to'],
+        evaluation_strategy=cli_config['eval_strategy'],
+        save_strategy=cli_config['eval_strategy'],
+        eval_steps=cli_config['eval_frequency'],
+        warmup_steps=cli_config['warmup_steps'],
+        report_to=cli_config['report_to'],
         save_total_limit=5,
     )
     trainer = MultitaskTrainer(
@@ -103,7 +95,7 @@ def train_news_clf(config):
         eval_dataset=nc_dataset['validation'],
         compute_metrics=compute_metrics,
         callbacks=[
-            EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
+            EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],
         data_collator={
             'eval': DataCollatorWithPadding(tokenizer=tokenizer),
@@ -118,18 +110,10 @@ def train_news_clf(config):
         multitask_dataloader_type=EvenMTDL
     )
 
-    hidden_state_keys = [f'{task_key}_hidden_states' for task_key in tasks.keys()]
+    # ignore hidden states in output, prevent OOM during eval
+    hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
-    train_kwargs = {
-        'ignore_keys_for_eval': hidden_state_keys  # prevent OOM during eval
-    }
-    if config['continue']:
-        train_kwargs.update({
-            'resume_from_checkpoint': config['checkpoint']
-        })
-
-    if not config['eval_only']:
-        trainer.train(**train_kwargs)
+    train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
     result = trainer.evaluate(
         nc_dataset['test'],

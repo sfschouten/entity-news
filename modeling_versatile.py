@@ -10,12 +10,13 @@ from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassif
 from transformers.file_utils import ModelOutput
 
 
-class Task(nn.Module):
+class Head(nn.Module):
 
     def __init__(self, key, config):
         super().__init__()
         self.key = key
         self.config = config
+        self.task_key, self.head_idx = key.split('-')
 
     def extract_kwargs(self, kwargs):
         raise NotImplementedError
@@ -24,11 +25,12 @@ class Task(nn.Module):
         raise NotImplementedError
 
 
-class TokenClassification(Task):
+class TokenClassification(Head):
 
     def __init__(self, key, config):
         super().__init__(key, config)
         config_dict = config.to_dict()
+
         self.num_labels = config_dict.get(f'{key}_num_labels', config.num_labels)
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
@@ -36,7 +38,7 @@ class TokenClassification(Task):
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
 
     def extract_kwargs(self, kwargs):
-        labels = kwargs.pop(f'{self.key}_labels', None)
+        labels = kwargs.pop(f'{self.task_key}_labels', None)
         return_dict = kwargs.get('return_dict', None)
         return labels, return_dict
 
@@ -65,7 +67,7 @@ class TokenClassification(Task):
         )
 
 
-class SequenceClassification(Task):
+class SequenceClassification(Head):
 
     def __init__(self, key, config):
         super().__init__(key, config)
@@ -78,7 +80,7 @@ class SequenceClassification(Task):
         self.classifier = nn.Linear(config.dim, self.num_labels)
 
     def extract_kwargs(self, kwargs):
-        labels = kwargs.pop(f'{self.key}_labels', None)
+        labels = kwargs.pop(f'{self.task_key}_labels', None)
         return_dict = kwargs.get('return_dict', None)
         return labels, return_dict
 
@@ -129,38 +131,38 @@ class SequenceClassification(Task):
         )
 
 
-class MultipleTasksOutput(ModelOutput):
+class VersatileOutput(ModelOutput):
     loss: Optional[FloatTensor] = None
 
 
 T = TypeVar('T', bound=PreTrainedModel)
 
 
-def create_multitask_class(model_cls: Type[T]):
+def create_versatile_class(model_cls: Type[T]):
 
-    class ModelForMultipleTasks(model_cls):
+    class VersatileModelForAnyTasks(model_cls):
 
         def __init__(self, config: PretrainedConfig,
-                     tasks: List[Tuple[str, float, Type[Task]]]):
+                     heads: List[Tuple[str, float, Type[Head]]]):
             super().__init__(config)
 
-            self.transformer_model = model_cls(config)
+            setattr(self, model_cls.base_model_prefix, model_cls(config))
 
-            self.loss_weights = {key: weight for key, (weight, _) in tasks}
+            self.loss_weights = {key: weight for key, (weight, _) in heads}
             self.normalizer = sum(self.loss_weights.values())
-            self.tasks = nn.ModuleDict({key: type_(key, config) for key, (_, type_) in tasks})
+            self.heads = nn.ModuleDict({key: type_(key, config) for key, (_, type_) in heads})
 
             self.post_init()
 
         def forward(self, **kwargs):
             # allow tasks to extract arguments specific to them first
-            task_args = {key: task.extract_kwargs(kwargs) for key, task in self.tasks.items()}
+            task_args = {key: task.extract_kwargs(kwargs) for key, task in self.heads.items()}
 
             # now forward the underlying transformer model
-            outputs = self.transformer_model(**kwargs, output_hidden_states=True)
+            outputs = self.base_model(**kwargs, output_hidden_states=True)
 
             # finally, forward the task-specific heads, passing the arguments extracted before
-            all_results = {key: task(outputs, *task_args[key]) for key, task in self.tasks.items()}
+            all_results = {key: task(outputs, *task_args[key]) for key, task in self.heads.items()}
 
             kwargs = {
                 f"{task}_{key}": values
@@ -168,7 +170,7 @@ def create_multitask_class(model_cls: Type[T]):
                 for key, values in results.items()
                 if key != 'loss'
             }
-            return MultipleTasksOutput(
+            return VersatileOutput(
                 loss=sum(
                     self.loss_weights[task] * value.view(())
                     for task, results in all_results.items()
@@ -197,4 +199,4 @@ def create_multitask_class(model_cls: Type[T]):
             """
             self.base_model.resize_position_embeddings(new_num_position_embeddings)
 
-    return ModelForMultipleTasks
+    return VersatileModelForAnyTasks

@@ -3,11 +3,12 @@ import pprint
 
 import numpy as np
 from datasets import load_dataset, load_metric
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, \
+from transformers import AutoTokenizer, TrainingArguments, \
     Trainer, EarlyStoppingCallback, DataCollatorWithPadding
 
 import mwep_dataset
-from utils import create_run_folder_and_config_dict
+from modeling_versatile import SequenceClassification
+from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
 from sklearn import metrics
 
@@ -40,23 +41,26 @@ def news_clf_dataset(config, tokenizer):
     return tokenized_dataset
 
 
-def train_news_clf(config):
-    tokenizer = AutoTokenizer.from_pretrained(config['model'])
-    tokenized_dataset = news_clf_dataset(config, tokenizer)
-    class_names = tokenized_dataset['train'].features['labels'].names
+def train_news_clf(cli_config):
+    wandb.init(project='entity-news', tags=['NewsCLF'])
 
-    # load model & metric
-    if config['checkpoint'] is not None:
-        model = AutoModelForSequenceClassification.from_pretrained(
-            config['checkpoint'], num_labels=len(class_names)
-        )
-    else:
-        model = AutoModelForSequenceClassification.from_pretrained(
-            config['model'], num_labels=len(class_names)
-        )
+    tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
+    tokenized_dataset = news_clf_dataset(cli_config, tokenizer).rename_column('labels', 'nc_labels')
+    class_names = tokenized_dataset['train'].features['nc_labels'].names
+
+    # load model
+    heads = {
+        "nc-0": (1., SequenceClassification),
+    }
+    model = create_or_load_versatile_model(
+        cli_config,
+        {
+            'nc-0_num_labels': len(class_names),
+        },
+        heads
+    )
+
     acc_metric = load_metric('accuracy')
-
-    wandb.init(project='entity-news', tags=['news_clf'])
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
@@ -70,19 +74,21 @@ def train_news_clf(config):
 
     # training
     training_args = TrainingArguments(
-        config['run_path'],
+        cli_config['run_path'],
         fp16=True,
-        num_train_epochs=config['max_nr_epochs'],
-        per_device_train_batch_size=config['batch_size_train'],
-        per_device_eval_batch_size=config['batch_size_eval'],
-        gradient_accumulation_steps=config['gradient_acc_steps'],
+        num_train_epochs=cli_config['max_nr_epochs'],
+        per_device_train_batch_size=cli_config['batch_size_train'],
+        per_device_eval_batch_size=cli_config['batch_size_eval'],
+        gradient_accumulation_steps=cli_config['gradient_acc_steps'],
         load_best_model_at_end=True,
         metric_for_best_model='accuracy',
-        evaluation_strategy=config['eval_strategy'],
-        save_strategy=config['eval_strategy'],
-        eval_steps=config['eval_frequency'],
-        warmup_steps=config['warmup_steps'],
-        report_to=config['report_to'],
+        remove_unused_columns=False,
+        label_names=['nc_labels'],
+        evaluation_strategy=cli_config['eval_strategy'],
+        save_strategy=cli_config['eval_strategy'],
+        eval_steps=cli_config['eval_frequency'],
+        warmup_steps=cli_config['warmup_steps'],
+        report_to=cli_config['report_to'],
         save_total_limit=5,
     )
     trainer = Trainer(
@@ -92,24 +98,27 @@ def train_news_clf(config):
         eval_dataset=tokenized_dataset['validation'],
         compute_metrics=compute_metrics,
         callbacks=[
-            EarlyStoppingCallback(early_stopping_patience=config['early_stopping_patience'])
+            EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],
         data_collator=DataCollatorWithPadding(
             tokenizer=tokenizer,
         ),
     )
 
-    if config['probing']:
+    if cli_config['probing']:
         for param in model.base_model.parameters():
             param.requires_grad = False
 
-    if not config['eval_only']:
-        if config['continue']:
-            trainer.train(resume_from_checkpoint=config['checkpoint'])
-        else:
-            trainer.train()
+    # ignore hidden states in output, prevent OOM during eval
+    hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
-    result = trainer.evaluate(tokenized_dataset['test'], metric_key_prefix='test')
+    train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
+
+    result = trainer.evaluate(
+        tokenized_dataset['test'],
+        metric_key_prefix='test',
+        ignore_keys=hidden_state_keys,
+    )
     pprint.pprint(result)
 
 

@@ -165,7 +165,7 @@ class MultitaskTrainer(transformers.Trainer):
                 the targets under the argument `labels`. Check your model's documentation for all
                 accepted arguments.
             prediction_loss_only (`bool`):
-                Whether or not to return the loss only.
+                Whether to return the loss only.
             ignore_keys (`Lst[str]`, *optional*):
                 A list of keys in the output of your model (if it is a dictionary) that should be
                 ignored when gathering predictions.
