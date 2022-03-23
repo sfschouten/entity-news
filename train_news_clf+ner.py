@@ -14,7 +14,7 @@ from modeling_multi_task import create_multitask_class, SequenceClassification, 
 from multitask_trainer import MultitaskTrainer, EvenMTDL
 from utils import create_run_folder_and_config_dict
 
-from train_entity_recognition import kilt_for_er_dataset, compute_er_metrics
+from train_ner import kilt_for_er_dataset, compute_er_metrics
 from train_news_clf import news_clf_dataset
 
 from sklearn import metrics
