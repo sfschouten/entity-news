@@ -78,7 +78,7 @@ def train_news_clf(cli_config):
         per_device_eval_batch_size=cli_config['batch_size_eval'],
         gradient_accumulation_steps=cli_config['gradient_acc_steps'],
         load_best_model_at_end=True,
-        metric_for_best_model='accuracy',
+        metric_for_best_model=cli_config['eval_metric'],
         remove_unused_columns=False,
         label_names=[f"{key}_labels" for key in datasets.keys()],
         evaluation_strategy=cli_config['eval_strategy'],
@@ -146,6 +146,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
+    parser.add_argument('--eval_metric', default='accuracy', type=str)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)

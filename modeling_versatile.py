@@ -1,13 +1,12 @@
-from typing import TypeVar, Type, List, Dict, Optional, Tuple, Generic
+from typing import TypeVar, Type, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 from torch import FloatTensor
 from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
-
 from transformers import PreTrainedModel, PretrainedConfig
-from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput
 from transformers.file_utils import ModelOutput
+from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput
 
 
 class Head(nn.Module):

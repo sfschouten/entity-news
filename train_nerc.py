@@ -89,7 +89,7 @@ def train_entity_recognition(cli_config):
         load_best_model_at_end=True,
         remove_unused_columns=False,
         label_names=["nerc_labels"],
-        metric_for_best_model='overall_f1',
+        metric_for_best_model=cli_config['eval_metric'],
         evaluation_strategy=cli_config['eval_strategy'],
         save_strategy=cli_config['eval_strategy'],
         eval_steps=cli_config['eval_frequency'],
@@ -149,6 +149,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
+    parser.add_argument('--eval_metric', default='overall_f1', type=str)
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
