@@ -1,5 +1,6 @@
 import argparse
 import pprint
+from functools import partial
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -41,6 +42,18 @@ def news_clf_dataset(config, tokenizer):
     return tokenized_dataset
 
 
+def compute_news_clf_metrics(acc_metric, class_names, eval_pred):
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+
+    print(metrics.classification_report(labels, preds, target_names=class_names))
+    print(metrics.confusion_matrix(labels, preds))
+    wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(
+        y_true=labels, preds=preds, class_names=class_names)})
+
+    return acc_metric.compute(predictions=preds, references=labels)
+
+
 def train_news_clf(cli_config):
     wandb.init(project='entity-news', tags=['NewsCLF'])
 
@@ -59,18 +72,6 @@ def train_news_clf(cli_config):
         },
         heads
     )
-
-    acc_metric = load_metric('accuracy')
-
-    def compute_metrics(eval_pred):
-        logits, labels = eval_pred
-        preds = np.argmax(logits, axis=-1)
-        print(metrics.classification_report(labels, preds, target_names=class_names))
-        print(metrics.confusion_matrix(labels, preds))
-        wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(probs=None,
-                                                              y_true=labels, preds=preds,
-                                                              class_names=class_names)})
-        return acc_metric.compute(predictions=preds, references=labels)
 
     # training
     training_args = TrainingArguments(
@@ -96,7 +97,7 @@ def train_news_clf(cli_config):
         args=training_args,
         train_dataset=tokenized_dataset['train'],
         eval_dataset=tokenized_dataset['validation'],
-        compute_metrics=compute_metrics,
+        compute_metrics=partial(compute_news_clf_metrics, load_metric('accuracy'), class_names),
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],

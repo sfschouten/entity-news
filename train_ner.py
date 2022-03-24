@@ -13,6 +13,8 @@ from modeling_versatile import TokenClassification
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 import el_wiki_dataset
 
+from sklearn import metrics
+
 I, O, B = 0, 1, 2
 
 
@@ -112,6 +114,14 @@ def compute_ner_metrics(seq_metric, eval_pred):
 
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
+
+    cf_labels = labels[labels != -100]
+    cf_preds = preds[labels != -100]
+    print()
+    print(metrics.confusion_matrix(cf_labels, cf_preds))
+    wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(
+        y_true=cf_labels, preds=cf_preds, class_names=["I", "O", "B"])})
+
     labels = swap4lbl(labels)
     preds = swap4lbl(preds)
     preds = [pred[:len(lbl)] for pred, lbl in zip(preds, labels)]
@@ -131,7 +141,7 @@ def train_entity_recognition(cli_config):
     kilt_dataset = DatasetDict({
         'train': train_eval['train'],
         'validation': valid_test['train'],
-        'test':  valid_test['test']
+        'test': valid_test['test']
     })
 
     # conll2003 dataset
@@ -219,6 +229,25 @@ def train_entity_recognition(cli_config):
             print(result)
 
 
+def sanity_check_kilt_iob_labels(cli_config):
+    tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
+
+    # kilt dataset
+    kilt_dataset = kilt_for_er_dataset(cli_config, tokenizer)
+    kilt_data = kilt_dataset.select(list(range(10)))
+
+    for sample in kilt_data:
+        labels = sample['labels']
+        labels = [{I: 'I', O: 'O', B: 'B'}[l] for l in labels]
+
+        token_ids = sample['input_ids']
+        tokens = tokenizer.convert_ids_to_tokens(token_ids)
+
+        print(list(zip(tokens, labels)))
+
+    exit()
+
+
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
@@ -239,7 +268,7 @@ if __name__ == "__main__":
     # dataset
     parser.add_argument('--train_dataset', choices=['kilt', 'conll'], default='kilt')
     parser.add_argument('--valid_dataset', choices=['kilt', 'conll'], default='kilt')
-    parser.add_argument('--test_dataset',  choices=['kilt', 'conll'], default=['kilt', 'conll'],
+    parser.add_argument('--test_dataset', choices=['kilt', 'conll'], default=['kilt', 'conll'],
                         nargs='*')
 
     parser.add_argument('--er_dataset_size', default=None, type=int)
@@ -256,7 +285,13 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
 
+    parser.add_argument('--do_sanity_checks', action='store_true')
+
     args = parser.parse_args()
-    train_entity_recognition(
-        create_run_folder_and_config_dict(args)
-    )
+
+    cli_config = create_run_folder_and_config_dict(args)
+
+    if args.do_sanity_checks:
+        sanity_check_kilt_iob_labels(cli_config)
+
+    train_entity_recognition(cli_config)

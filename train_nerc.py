@@ -13,6 +13,8 @@ from data_collator import DataCollatorForTokenClassification
 from modeling_versatile import TokenClassification
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
+from sklearn import metrics
+
 
 def conll2003_dataset(config, tokenizer):
     def labels(example, batch_encoding: BatchEncoding):
@@ -43,6 +45,13 @@ def compute_nerc_metrics(seq_metric, eval_pred):
 
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
+
+    cf_labels = labels[labels != -100]
+    cf_preds = preds[labels != -100]
+
+    print(metrics.confusion_matrix(cf_labels, cf_preds))
+    wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(
+        y_true=cf_labels, preds=cf_preds, class_names=TAGS)})
 
     # only take predictions for which we have labels
     # and swap indices for label strings

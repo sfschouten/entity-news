@@ -13,9 +13,7 @@ from multitask_trainer import MultitaskTrainer, EvenMTDL
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
 from train_ner import kilt_for_er_dataset, compute_ner_metrics
-from train_news_clf import news_clf_dataset
-
-from sklearn import metrics
+from train_news_clf import news_clf_dataset, compute_news_clf_metrics
 
 import wandb
 
@@ -60,13 +58,13 @@ def train_news_clf(cli_config):
             er_metrics = compute_ner_metrics(seq_metric, (er_logits, er_labels))
             results.update(er_metrics)
         if not (nc_labels == -1).all():
-            preds = np.argmax(nc_logits, axis=-1)
-            nc_acc = acc_metric.compute(predictions=preds, references=nc_labels)
-            results.update(nc_acc)
-            print(metrics.classification_report(nc_labels, preds, target_names=nc_class_names))
-            print(metrics.confusion_matrix(nc_labels, preds))
-            wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(y_true=nc_labels, preds=preds,
-                                                                  class_names=nc_class_names)})
+            nc_metrics = compute_news_clf_metrics(
+                acc_metric,
+                nc_class_names,
+                (nc_logits, nc_labels)
+            )
+            results.update(nc_metrics)
+
         return results
 
     # training
