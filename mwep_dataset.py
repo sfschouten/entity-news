@@ -27,6 +27,9 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
         if self.mwep_event_types_path is None:
             self.mwep_event_types_path = os.path.join(self.data_dir, 'event_types.txt')
 
+        with open(self.mwep_event_types_path, 'r') as f:
+            self.event_types = f.readlines()
+
 
 class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
     BUILDER_CONFIG_CLASS = MWEPBuilderConfig
@@ -69,10 +72,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
             data_dir = os.path.join(self.config.data_dir, 'bin/')
 
         # load data
-        self.collections_by_file = {}
-        train_idxs = set()
-        valid_idxs = set()
-        test_idxs = set()
+        collections_by_file = {}
         for file in os.listdir(data_dir):
             if not file.endswith(',pilot.bin'):
                 continue
@@ -81,13 +81,41 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
             with open(path, 'rb') as pickle_file:
                 collection = pickle.load(pickle_file)
                 collection.incidents = list(collection.incidents)
-                self.collections_by_file[file] = collection
+                collections_by_file[file] = collection
+        self.collections_by_file = collections_by_file
 
+        # identify multi-label incidents
+        id_sets_by_type = {
+            file: set(
+                incident.wdt_id for incident in collections_by_file[file].incidents
+            ) for file in collections_by_file.keys()
+        }
+
+        multi_label_incidents = set()
+        pairs_done = set()
+        for a, a_set in id_sets_by_type.items():
+            for b, b_set in id_sets_by_type.items():
+                pair = frozenset([a, b])
+                if pair in pairs_done or a == b:
+                    continue
+                pairs_done.add(frozenset([a, b]))
+
+                overlap = a_set & b_set
+                if len(overlap) > 0:
+                    print(f"Between {a} and {b} there was an overlap of {len(overlap)} incidents, "
+                          f"which will be filtered out.")
+                    multi_label_incidents |= overlap
+
+        train_idxs = set()
+        valid_idxs = set()
+        test_idxs = set()
+        for file, collection in self.collections_by_file.items():
             # TODO keep wikipedia pages?
             c_idxs = set(
                 (file, inc_i, txt_i)
                 for inc_i, inc in enumerate(collection.incidents)
                 for txt_i, _ in enumerate(inc.reference_texts)
+                if inc.wdt_id not in multi_label_incidents      # TODO look into multi-label?
             )
 
             if self.config.eval_split_size_abs is not None:
@@ -185,12 +213,14 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
 if __name__ == "__main__":
     # disable caching for this test code
-    datasets.set_caching_enabled(False)
+    datasets.disable_caching()
 
     # load a dataset
     dataset = load_dataset(
         __file__,
-        data_dir="../data/minimal",
+        #data_dir="../data/minimal",
+        #data_dir="../data/medium",
+        data_dir="../data/medium_plus",
         mwep_path="../mwep",
         split_level='incident',
         eval_split_size_rel=0.1,
