@@ -105,6 +105,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                     print(f"Between {a} and {b} there was an overlap of {len(overlap)} incidents, "
                           f"which will be filtered out.")
                     multi_label_incidents |= overlap
+        print(f"Identified a total of {len(multi_label_incidents)} multi-label incidents.")
 
         train_idxs = set()
         valid_idxs = set()
@@ -125,7 +126,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
             else:
                 raise ValueError('Either an absolute or relative split size must be specified.')
 
-            print(f"For {file} we have {len(c_idxs)} incidents, targeting eval split size of "
+            print(f"For {file} we have {len(c_idxs)} articles, targeting eval split size of "
                   f"at least {eval_split_size}")
 
             def article_level_split():
@@ -141,7 +142,8 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
             def incident_level_split():
                 nonlocal c_idxs
-                c_inc_idxs = list(range(len(collection.incidents)))
+                c_inc_idxs = list(i for i, inc in enumerate(collection.incidents)
+                                  if inc.wdt_id not in multi_label_incidents)
                 random.shuffle(c_inc_idxs)
 
                 def split_off_eval():
