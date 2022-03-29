@@ -53,7 +53,7 @@ def kilt_for_er_dataset(config, tokenizer):
         return batch_encoding
 
     kwargs = {}
-    if config['er_dataset_size']:
+    if config['ner_dataset_size']:
         kwargs['max_samples'] = config['er_dataset_size']
     dataset = load_dataset(
         el_wiki_dataset.__file__,
@@ -72,7 +72,15 @@ def kilt_for_er_dataset(config, tokenizer):
         ), batched=False
     ).remove_columns(['mentioning_text', 'mentions'])
 
-    return tokenized_dataset
+    train_eval = tokenized_dataset.train_test_split(test_size=0.01)
+    valid_test = train_eval['test'].train_test_split(test_size=0.5)
+    kilt_dataset = DatasetDict({
+        'train': train_eval['train'],
+        'validation': valid_test['train'],
+        'test': valid_test['test']
+    })
+
+    return kilt_dataset
 
 
 def conll2003_dataset(config, tokenizer):
@@ -136,13 +144,6 @@ def train_entity_recognition(cli_config):
 
     # kilt dataset
     kilt_dataset = kilt_for_er_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
-    train_eval = kilt_dataset.train_test_split(test_size=0.01)
-    valid_test = train_eval['test'].train_test_split(test_size=0.5)
-    kilt_dataset = DatasetDict({
-        'train': train_eval['train'],
-        'validation': valid_test['train'],
-        'test': valid_test['test']
-    })
 
     # conll2003 dataset
     conll_dataset = conll2003_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
@@ -271,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_dataset', choices=['kilt', 'conll'], default=['kilt', 'conll'],
                         nargs='*')
 
-    parser.add_argument('--er_dataset_size', default=None, type=int)
+    parser.add_argument('--ner_dataset_size', default=None, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)

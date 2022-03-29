@@ -1,7 +1,6 @@
 import argparse
 import pprint
 
-import numpy as np
 from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, EarlyStoppingCallback, \
     DataCollatorWithPadding
@@ -12,7 +11,7 @@ from modeling_versatile import SequenceClassification, TokenClassification
 from multitask_trainer import MultitaskTrainer, EvenMTDL
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
-from train_ner import kilt_for_er_dataset, compute_ner_metrics
+from train_ner import kilt_for_er_dataset, conll2003_dataset, compute_ner_metrics
 from train_news_clf import news_clf_dataset, compute_news_clf_metrics
 
 import wandb
@@ -27,10 +26,13 @@ def train_news_clf(cli_config):
     nc_dataset = news_clf_dataset(cli_config, tokenizer)
     nc_class_names = nc_dataset['train'].features['labels'].names
     nc_dataset = nc_dataset.rename_column('labels', 'nc_labels')
-    datasets = {
-        "nc": nc_dataset['train'],
-        "er": kilt_for_er_dataset(cli_config, tokenizer).rename_column('labels', 'er_labels'),
-    }
+
+    er_dataset = {
+        'kilt': kilt_for_er_dataset,
+        'conll': conll2003_dataset
+    }[cli_config['ner_dataset']](cli_config, tokenizer).rename_column('labels', 'er_labels')
+
+    datasets = {"nc": nc_dataset['train'], "er": er_dataset['train']}
 
     # model
     heads = {
@@ -42,7 +44,7 @@ def train_news_clf(cli_config):
         {
             'nc-0_num_labels': len(nc_class_names),
             'er-0_num_labels': 3,
-            'er-0_attach_layer': cli_config['er_attach_layer'],
+            'er-0_attach_layer': cli_config['ner_attach_layer'],
         },
         heads
     )
@@ -134,13 +136,15 @@ if __name__ == "__main__":
     parser.add_argument('--run_name', default=None)
 
     parser.add_argument('--model', default="distilbert-base-cased")
-    parser.add_argument('--er_attach_layer', default=-1, type=int)
+    parser.add_argument('--ner_attach_layer', default=2, type=int)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
     parser.add_argument('--eval_only', action='store_true')
 
-    parser.add_argument('--er_dataset_size', default=None, type=int)
+    parser.add_argument('--ner_dataset', choices=['kilt', 'conll'], default='kilt')
+
+    parser.add_argument('--ner_dataset_size', default=None, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
