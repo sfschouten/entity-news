@@ -47,6 +47,21 @@ def compute_news_clf_metrics(acc_metric, class_names, eval_pred):
     preds = np.argmax(logits, axis=-1)
 
     print(metrics.classification_report(labels, preds, target_names=class_names))
+    clf_report_dct = metrics.classification_report(
+        labels, preds,
+        target_names=class_names,
+        output_dict=True
+    )
+    clf_report = [
+        [key] + list(row.values())
+        for key, row in clf_report_dct.items()
+        if key != 'accuracy'
+    ] + [['accuracy', 0., 0., clf_report_dct['accuracy'], 0]]
+    wandb.log({"nc_clf_report": wandb.Table(
+        columns=['', 'precision', 'recall', 'f1-score', 'support'],
+        data=clf_report
+    )})
+
     print(metrics.confusion_matrix(labels, preds))
     wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(
         y_true=labels, preds=preds, class_names=class_names)})
