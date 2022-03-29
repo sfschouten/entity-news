@@ -2,6 +2,8 @@ import sys
 import os
 import pickle
 import random
+import hashlib
+import hashlib
 
 from dataclasses import dataclass
 
@@ -73,14 +75,14 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
         # load data
         collections_by_file = {}
-        for file in os.listdir(data_dir):
+        for file in sorted(os.listdir(data_dir)):
             if not file.endswith(',pilot.bin'):
                 continue
 
             path = os.path.join(data_dir, file)
             with open(path, 'rb') as pickle_file:
                 collection = pickle.load(pickle_file)
-                collection.incidents = list(collection.incidents)
+                collection.incidents = sorted(collection.incidents, key=lambda x: x.wdt_id)
                 collections_by_file[file] = collection
         self.collections_by_file = collections_by_file
 
@@ -93,8 +95,9 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
         multi_label_incidents = set()
         pairs_done = set()
-        for a, a_set in id_sets_by_type.items():
-            for b, b_set in id_sets_by_type.items():
+        # breakpoint()
+        for a, a_set in sorted(id_sets_by_type.items()):
+            for b, b_set in sorted(id_sets_by_type.items()):
                 pair = frozenset([a, b])
                 if pair in pairs_done or a == b:
                     continue
@@ -110,7 +113,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
         train_idxs = set()
         valid_idxs = set()
         test_idxs = set()
-        for file, collection in self.collections_by_file.items():
+        for file, collection in sorted(self.collections_by_file.items()):
             # TODO keep wikipedia pages?
             c_idxs = set(
                 (file, inc_i, txt_i)
@@ -181,6 +184,21 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 ]
             else:
                 raise ValueError('Invalid split_level!')
+
+        def hashable_split_repr(split_idxs):
+            return sorted(tuple(
+                (
+                    self.collections_by_file[file].incidents[inc_i].wdt_id,
+                    self.collections_by_file[file].incidents[inc_i].reference_texts[txt_i].uri
+                )
+                for file, inc_i, txt_i in split_idxs
+            ))
+
+        hash_fn = lambda x: hashlib.sha256(str(x).encode("utf-8")).hexdigest()
+        print(f"Hash of multi-label incidents: {hash_fn(sorted(multi_label_incidents))}")
+        print(f"Hash of train-split: {hash_fn(hashable_split_repr(train_idxs))}")
+        print(f"Hash of validation-split: {hash_fn(hashable_split_repr(valid_idxs))}")
+        print(f"Hash of test-split: {hash_fn(hashable_split_repr(test_idxs))}\n")
 
         return [
             datasets.SplitGenerator(
