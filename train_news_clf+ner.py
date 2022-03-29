@@ -36,8 +36,8 @@ def train_news_clf(cli_config):
 
     # model
     heads = {
-        "nc-0": (1., SequenceClassification),
-        "er-0": (1., TokenClassification),
+        "nc-0": (cli_config['nc_loss_factor'], SequenceClassification),
+        "er-0": (cli_config['er_loss_factor'], TokenClassification),
     }
     model = create_or_load_versatile_model(
         cli_config,
@@ -143,7 +143,6 @@ if __name__ == "__main__":
     parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--ner_dataset', choices=['kilt', 'conll'], default='kilt')
-
     parser.add_argument('--ner_dataset_size', default=None, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
@@ -157,8 +156,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
-    # parser.add_argument('--learning_rate_base', default=1e-4, type=float)
-    # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
+    parser.add_argument('--nc_loss_factor', default=1., type=float)
+    parser.add_argument('--er_loss_factor', default=1., type=float)
 
     args = parser.parse_args()
     train_news_clf(
