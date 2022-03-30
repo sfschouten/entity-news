@@ -78,12 +78,13 @@ def train_entity_recognition(cli_config):
     conll_dataset = conll_dataset.rename_column('labels', 'nerc_labels')
 
     # load model
-    heads = {"nerc-0": (1., TokenClassification)}
+    head_id = cli_config['head_id']
+    heads = {head_id: (1., TokenClassification)}
     model = create_or_load_versatile_model(
         cli_config,
         {
-            'nerc-0_num_labels': 9,
-            'nerc-0_attach_layer': cli_config['head_attach_layer'],
+            f'{head_id}_num_labels': 9,
+            f'{head_id}_attach_layer': cli_config['head_attach_layer'],
         },
         heads
     )
@@ -151,6 +152,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
     parser.add_argument('--head_attach_layer', default=-1, type=int)
+    parser.add_argument('--head_id', default='nerc-0', type=str)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')

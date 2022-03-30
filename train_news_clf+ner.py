@@ -30,21 +30,24 @@ def train_news_clf(cli_config):
     er_dataset = {
         'kilt': kilt_for_er_dataset,
         'conll': conll2003_dataset
-    }[cli_config['ner_dataset']](cli_config, tokenizer).rename_column('labels', 'er_labels')
+    }[cli_config['ner_dataset']](cli_config, tokenizer).rename_column('labels', 'ner_labels')
 
-    datasets = {"nc": nc_dataset['train'], "er": er_dataset['train']}
+    datasets = {"nc": nc_dataset['train'], "ner": er_dataset['train']}
+
+    nc_head_id = cli_config['nc_head_id']
+    ner_head_id = cli_config['ner_head_id']
 
     # model
     heads = {
-        "nc-0": (cli_config['nc_loss_factor'], SequenceClassification),
-        "er-0": (cli_config['er_loss_factor'], TokenClassification),
+        nc_head_id: (cli_config['nc_loss_factor'], SequenceClassification),
+        ner_head_id: (cli_config['ner_loss_factor'], TokenClassification),
     }
     model = create_or_load_versatile_model(
         cli_config,
         {
-            'nc-0_num_labels': len(nc_class_names),
-            'er-0_num_labels': 3,
-            'er-0_attach_layer': cli_config['ner_attach_layer'],
+            f'{nc_head_id}_num_labels': len(nc_class_names),
+            f'{ner_head_id}_num_labels': 3,
+            f'{ner_head_id}_attach_layer': cli_config['ner_attach_layer'],
         },
         heads
     )
@@ -101,9 +104,9 @@ def train_news_clf(cli_config):
             'eval': DataCollatorWithPadding(tokenizer=tokenizer),
             'train': {
                 'nc': DataCollatorWithPadding(tokenizer=tokenizer),
-                'er': DataCollatorForTokenClassification(
+                'ner': DataCollatorForTokenClassification(
                     tokenizer=tokenizer,
-                    label_name='er_labels'
+                    label_name='ner_labels'
                 )
             }
         },
@@ -137,6 +140,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--ner_attach_layer', default=2, type=int)
+    parser.add_argument('--ner_head_id', default='ner-0', type=str)
+    parser.add_argument('--nc_head_id', default='nc-0', type=str)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
@@ -157,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
     parser.add_argument('--nc_loss_factor', default=1., type=float)
-    parser.add_argument('--er_loss_factor', default=1., type=float)
+    parser.add_argument('--ner_loss_factor', default=1., type=float)
 
     args = parser.parse_args()
     train_news_clf(

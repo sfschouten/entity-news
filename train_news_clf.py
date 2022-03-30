@@ -77,13 +77,14 @@ def train_news_clf(cli_config):
     class_names = tokenized_dataset['train'].features['nc_labels'].names
 
     # load model
+    head_id = cli_config['head_id']
     heads = {
-        "nc-0": (1., SequenceClassification),
+        head_id: (1., SequenceClassification),
     }
     model = create_or_load_versatile_model(
         cli_config,
         {
-            'nc-0_num_labels': len(class_names),
+            f'{head_id}_num_labels': len(class_names),
         },
         heads
     )
@@ -151,6 +152,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
+    parser.add_argument('--head_id', default='nc-0', type=str)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
