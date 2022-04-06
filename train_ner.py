@@ -142,11 +142,18 @@ def train_entity_recognition(cli_config):
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
+    any_dataset = [cli_config['train_dataset'], cli_config['valid_dataset']] \
+                + cli_config['test_dataset']
+
     # kilt dataset
-    kilt_dataset = kilt_for_er_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
+    if 'kilt' in any_dataset:
+        kilt_dataset = kilt_for_er_dataset(cli_config, tokenizer)\
+            .rename_column('labels', 'ner_labels')
 
     # conll2003 dataset
-    conll_dataset = conll2003_dataset(cli_config, tokenizer).rename_column('labels', 'ner_labels')
+    if 'conll' in any_dataset:
+        conll_dataset = conll2003_dataset(cli_config, tokenizer)\
+            .rename_column('labels', 'ner_labels')
 
     if cli_config['train_dataset'] == 'kilt':
         train_set = kilt_dataset['train']

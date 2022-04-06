@@ -3,6 +3,7 @@ channels:
   - conda-forge
   - pytorch
   - nvidia
+  - plotly
 dependencies:
   - defaults::python=3.9
   - defaults::pip
@@ -14,5 +15,6 @@ dependencies:
   - conda-forge::scipy
   - conda-forge::scikit-learn
   - conda-forge::seqeval
+  - plotly::plotly
   - pip:
       - tokenizers>=0.11
