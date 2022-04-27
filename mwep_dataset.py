@@ -2,7 +2,7 @@ import sys
 import os
 import pickle
 import random
-import hashlib
+import json
 import hashlib
 
 from dataclasses import dataclass
@@ -29,8 +29,14 @@ class MWEPBuilderConfig(datasets.BuilderConfig):
         if self.mwep_event_types_path is None:
             self.mwep_event_types_path = os.path.join(self.data_dir, 'event_types.txt')
 
+        self.mwep_type2inc_index_path = os.path.join(self.data_dir, 'json/type2inc_index.json')
+
         with open(self.mwep_event_types_path, 'r') as f:
             self.event_types = f.readlines()
+
+        with open(self.mwep_type2inc_index_path, 'r') as f:
+            self.type2inc = json.load(f)
+            self.incidents = sorted(set([inc for incs in self.type2inc.values() for inc in incs]))
 
 
 class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
@@ -44,7 +50,7 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
                 "uri": datasets.Value("string"),
                 "content": datasets.Value("string"),
                 "incident": {
-                    "wdt_id": datasets.Value("string"),
+                    "wdt_id": datasets.ClassLabel(names=self.config.incidents),
                     "incident_type": datasets.ClassLabel(
                         names_file=self.config.mwep_event_types_path),
                     "extra_info": {
@@ -95,7 +101,6 @@ class MWEPDatasetBuilder(datasets.GeneratorBasedBuilder):
 
         multi_label_incidents = set()
         pairs_done = set()
-        # breakpoint()
         for a, a_set in sorted(id_sets_by_type.items()):
             for b, b_set in sorted(id_sets_by_type.items()):
                 pair = frozenset([a, b])
