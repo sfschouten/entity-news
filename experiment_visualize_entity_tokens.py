@@ -5,7 +5,7 @@ import torch
 from datasets import load_dataset
 from numpy.typing import ArrayLike
 
-import mwep_dataset
+import dataset_mwep
 import wandb
 from sklearn.manifold import TSNE
 from transformers import AutoTokenizer, TrainingArguments, DataCollatorWithPadding, pipeline
@@ -24,7 +24,7 @@ from scipy.special import softmax
 def news_clf_dataset(config, tokenizer):
     # dataset processing/loading
     dataset = load_dataset(
-        mwep_dataset.__file__,
+        dataset_mwep.__file__,
         data_dir=config['nc_data_folder'],
         mwep_path=config['mwep_home'],
     )

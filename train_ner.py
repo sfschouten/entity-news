@@ -11,7 +11,7 @@ from transformers import AutoTokenizer, BatchEncoding, \
 from data_collator import DataCollatorForTokenClassification
 from modeling_versatile import TokenClassification
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
-import el_wiki_dataset
+import dataset_el_wiki
 
 from sklearn import metrics
 
@@ -56,7 +56,7 @@ def kilt_for_er_dataset(config, tokenizer):
     if config['ner_dataset_size']:
         kwargs['max_samples'] = config['ner_dataset_size']
     dataset = load_dataset(
-        el_wiki_dataset.__file__,
+        dataset_el_wiki.__file__,
         split='full',
         **kwargs
     )
