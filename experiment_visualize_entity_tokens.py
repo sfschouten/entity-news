@@ -12,7 +12,6 @@ from transformers import AutoTokenizer, TrainingArguments, DataCollatorWithPaddi
 
 from modeling_versatile import SequenceClassification, TokenClassification
 from train_ner import B
-from train_news_clf import news_clf_dataset
 from trainer import Trainer
 from utils import create_or_load_versatile_model, create_run_folder_and_config_dict
 
@@ -23,7 +22,7 @@ from scipy.special import softmax
 from utils_dataset_enrich import enrich_dataset
 
 
-def news_clf_dataset(config, tokenizer):
+def news_clf_dataset_with_ots_ner(config, tokenizer):
     # dataset processing/loading
     dataset = load_dataset(
         dataset_mwep.__file__,
@@ -75,7 +74,8 @@ def news_clf_dataset(config, tokenizer):
 def create_tsne(cli_config):
     # load dataset
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    tokenized_dataset = news_clf_dataset(cli_config, tokenizer).rename_column('labels', 'nc_labels')
+    tokenized_dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)\
+        .rename_column('labels', 'nc_labels')
     nc_class_names = tokenized_dataset['train'].features['nc_labels'].names
     nc_incident_names = tokenized_dataset['train'].features['incident.wdt_id'].names
 
@@ -246,7 +246,6 @@ def create_tsne(cli_config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    #parser.add_argument('--nc_data_folder', default="../data/minimal")
     parser.add_argument('--nc_data_folder', default="../data/medium_plus")
 
     parser.add_argument('--mwep_home', default='../mwep')

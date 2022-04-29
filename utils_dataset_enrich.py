@@ -42,6 +42,10 @@ def enrich_dataset(dataset: Dataset, pipe: Pipeline, process_fn: Callable, pipe_
         results = pipe(columns[pipe_column], **pipe_kwargs)
         return process_fn(columns, results)
 
+    # remove parameters that do not influence predictions
+    del pipe_kwargs['batch_size']
+
+    # store parameters that do influence predictions, which will be used to calculate the hash
     enrich_fn_hash_object_store[enrich_fn] = {
         'pipe_model_name_or_path': pipe.model.name_or_path,
         'tokenizer': pipe.tokenizer,

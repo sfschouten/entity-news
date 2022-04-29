@@ -69,11 +69,11 @@ def compute_news_clf_metrics(acc_metric, class_names, eval_pred):
     return acc_metric.compute(predictions=preds, references=labels)
 
 
-def train_news_clf(cli_config):
+def train_news_clf(cli_config, dataset_fn):
     wandb.init(project='entity-news', tags=['NewsCLF'])
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    tokenized_dataset = news_clf_dataset(cli_config, tokenizer).rename_column('labels', 'nc_labels')
+    tokenized_dataset = dataset_fn(cli_config, tokenizer).rename_column('labels', 'nc_labels')
     class_names = tokenized_dataset['train'].features['nc_labels'].names
 
     # load model
@@ -173,6 +173,4 @@ if __name__ == "__main__":
     # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
 
     args = parser.parse_args()
-    train_news_clf(
-        create_run_folder_and_config_dict(args)
-    )
+    train_news_clf(create_run_folder_and_config_dict(args), news_clf_dataset)
