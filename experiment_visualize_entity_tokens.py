@@ -20,6 +20,8 @@ import plotly.express as px
 import numpy as np
 from scipy.special import softmax
 
+from utils_dataset_enrich import enrich_dataset
+
 
 def news_clf_dataset(config, tokenizer):
     # dataset processing/loading
@@ -49,19 +51,23 @@ def news_clf_dataset(config, tokenizer):
         device=0
     )
 
-    def enrich_fn(examples):
-        results = pipe(examples['content'], batch_size=config['batch_size_eval'])
+    def process_fn(columns, pipe_results):
+        _, _, _, input_ids, _ = columns
         ner = []
-        for input_ids, result in zip(examples['input_ids'], results):
+        for input_ids, result in zip(input_ids, pipe_results):
             entities = ['O'] * len(input_ids)
             for entity in result:
                 if entity['index'] >= len(entities):
                     continue
                 entities[entity['index']] = entity['entity']
             ner.append(entities)
-        examples['ner'] = ner
-        return examples
-    enriched_dataset = tokenized_dataset.map(enrich_fn, batched=True, batch_size=2**10)
+        return {'ner': ner}
+
+    enriched_dataset = enrich_dataset(
+        tokenized_dataset, pipe, process_fn,
+        pipe_kwargs={'batch_size': config['batch_size_eval']},
+        map_kwargs={'batched': True, 'batch_size': 2**10}
+    )
 
     return enriched_dataset.remove_columns(['content'])
 
@@ -240,8 +246,8 @@ def create_tsne(cli_config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--nc_data_folder', default="../data/minimal")
-    #parser.add_argument('--nc_data_folder', default="../data/medium_plus")
+    #parser.add_argument('--nc_data_folder', default="../data/minimal")
+    parser.add_argument('--nc_data_folder', default="../data/medium_plus")
 
     parser.add_argument('--mwep_home', default='../mwep')
     parser.add_argument('--runs_folder', default='runs')
