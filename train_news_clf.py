@@ -33,9 +33,16 @@ def news_clf_dataset(config, tokenizer):
         ]
     ).rename_column('incident.incident_type', 'labels')
 
+    if tokenizer.name_or_path in tokenizer.max_model_input_sizes:
+        max_length = tokenizer.max_model_input_sizes[tokenizer.name_or_path]
+    else:
+        max_length = 512
+        print("No max length can be inferred, falling back to 512")
+
     # tokenize
     tokenized_dataset = dataset.map(
-        lambda examples: tokenizer(examples['content'], padding=False, truncation=True),
+        lambda examples: tokenizer(
+            examples['content'], padding=False, truncation=True, max_length=max_length),
         batched=True
     ).remove_columns(['content'])
 

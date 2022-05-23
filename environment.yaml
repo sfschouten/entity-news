@@ -15,6 +15,7 @@ dependencies:
   - conda-forge::scipy
   - conda-forge::scikit-learn
   - conda-forge::seqeval
+  - conda-forge::sentencepiece
   - plotly::plotly
   - pip:
       - tokenizers>=0.11

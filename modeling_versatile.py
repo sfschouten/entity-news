@@ -9,6 +9,22 @@ from transformers.file_utils import ModelOutput
 from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput
 
 
+def _versatile_dropout(config_dict, key):
+    if f'{key}_dropout' in config_dict:
+        dropout = config_dict[f'{key}_dropout']
+    else:
+        print("Dropout for SequenceClassificationHead not specified...")
+        for key in config_dict.keys():
+            if 'dropout' in key:
+                dropout = config_dict[key]
+                print(f"falling back to '{key}' with value {dropout}")
+                break
+        else:
+            print("falling back to no dropout")
+            dropout = 0
+    return dropout
+
+
 class Head(nn.Module):
 
     def __init__(self, key, config):
@@ -33,7 +49,7 @@ class TokenClassification(Head):
         self.num_labels = config_dict.get(f'{key}_num_labels', config.num_labels)
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
-        self.dropout = nn.Dropout(config.dropout)
+        self.dropout = nn.Dropout(_versatile_dropout(config_dict, key))
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
 
     def extract_kwargs(self, kwargs):
@@ -45,7 +61,7 @@ class TokenClassification(Head):
         labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        sequence_output = base_outputs[1][self.attach_layer]
+        sequence_output = base_outputs['hidden_states'][self.attach_layer]
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
@@ -74,9 +90,10 @@ class SequenceClassification(Head):
         self.num_labels = config_dict.get(f'{key}_num_labels', config.num_labels)
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
-        self.dropout = nn.Dropout(config.dropout)
-        self.pre_classifier = nn.Linear(config.dim, config.dim)
-        self.classifier = nn.Linear(config.dim, self.num_labels)
+        self.dropout = nn.Dropout(_versatile_dropout(config_dict, key))
+
+        self.pre_classifier = nn.Linear(config.hidden_size, config.hidden_size)
+        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
 
     def extract_kwargs(self, kwargs):
         labels = kwargs.pop(f'{self.task_key}_labels', None)
@@ -87,7 +104,7 @@ class SequenceClassification(Head):
         labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        hidden_state = base_outputs[1][self.attach_layer]       # (bs, seq_len, dim)
+        hidden_state = base_outputs['hidden_states'][self.attach_layer]       # (bs, seq_len, dim)
         pooled_output = hidden_state[:, 0]                      # (bs, dim)
         pooled_output = self.pre_classifier(pooled_output)      # (bs, dim)
         pooled_output = nn.ReLU()(pooled_output)                # (bs, dim)
