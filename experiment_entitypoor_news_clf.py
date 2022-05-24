@@ -1,8 +1,6 @@
 import argparse
 from collections import Counter
-from dataclasses import dataclass
 import random
-from typing import List
 
 from train_news_clf import train_news_clf
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
@@ -12,7 +10,6 @@ from utils import create_run_folder_and_config_dict
 def entity_poor_news_clf_dataset(cli_config, tokenizer):
     dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
 
-    # remove entities
     def mask_entities(samples):
         input_ids = samples['input_ids']
         ner_preds = samples['ner']
@@ -26,6 +23,7 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
         return samples
 
     def substitute_entities(samples):
+        nonlocal tokenizer
         input_ids = samples['input_ids']
         ner_preds = samples['ner']
         topics = samples['labels']
@@ -53,37 +51,86 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 if ner.startswith('B'):
                     entity_mentions.append(Mention(i))
                     entity_mentions[-1].append(input_id, j)
-                if ner.startswith('I') and entity_mentions[-1].token_idxs[-1] == j-1:
+                if ner.startswith('I') and entity_mentions[-1].token_idxs[-1] == j - 1:
                     entity_mentions[-1].append(input_id, j)
 
-        # count, so we know which are most frequent
+        # count, so we can sample based on frequency
         entity_mention_count = Counter(entity_mentions)
-        most_frequent = entity_mention_count.most_common(50)
 
-        # calculate distribution over topics
-        entity_mention_topic_count = Counter([
-            (mention, topics[mention.sample_index]) for mention in entity_mentions
-        ])
+        if cli_config['substitute_variant'] == 'random_tokens':
+            vocab = list(tokenizer.vocab.values())
 
+            def sample_fn(mention: Mention):
+                return random.sample(vocab, len(mention.token_ids))
+        elif cli_config['substitute_variant'] == 'random_mention':
+            unique = set(entity_mentions)
+
+            def sample_fn(_):
+                entity, _ = random.sample(unique, 1)[0]
+                return entity.token_ids
+        elif cli_config['substitute_variant'] == 'frequency':
+            most_frequent = entity_mention_count.most_common(50)  # TODO make config option
+
+            # print most frequent
+            print(sorted([
+                tokenizer.convert_ids_to_tokens(mention.token_ids)
+                for mention, _ in most_frequent
+            ]))
+
+            def sample_fn(_):
+                entity, _ = random.sample(most_frequent, 1)[0]
+                return entity.token_ids
+        elif cli_config['substitute_variant'] == 'topic_shift':
+            # calculate distribution over topics
+            entity_mention_topic_count = Counter([
+                (mention, topics[mention.sample_index]) for mention in entity_mentions
+            ])
+
+            def sample_fn(mention: Mention):
+                pass
+        else:
+            def sample_fn(_):
+                raise NotImplementedError()
+
+        # organize mentions by sample
         entity_mentions_by_sample = [[] for _ in range(len(input_ids))]
         for mention in entity_mentions:
             entity_mentions_by_sample[mention.sample_index].append(mention)
 
         # make the substitutions
         for i, sample_mentions in enumerate(entity_mentions_by_sample):
+            # create mapping from entities to substitutes
+            substitute_tokens = {mention: sample_fn(mention) for mention in set(sample_mentions)}
+
             # go through mentions in this sample in reverse order
             for mention in sorted(sample_mentions, key=lambda m: m.token_idxs[0], reverse=True):
                 start_idx = mention.token_idxs[0]
+
+                # delete tokens
                 for idx in reversed(mention.token_idxs):
-                    #print(f"deleting {mention.sample_index}:{idx}")
+                    # print(f"deleting {mention.sample_index}:{idx}")
+                    if idx >= len(input_ids[mention.sample_index]):
+                        print(f"WARNING: idx ({idx}) was outside of array bounds "
+                              f"(len={len(input_ids[mention.sample_index])}).")
+                        continue
                     del input_ids[mention.sample_index][idx]
 
-                entity, _ = random.sample(most_frequent, 1)[0]
-                for t in reversed(entity.token_ids):
-                    #print(f"inserting {t} at {mention.sample_index}:{start_idx}")
+                # insert substitute
+                for t in reversed(substitute_tokens[mention]):
                     input_ids[mention.sample_index].insert(start_idx, t)
-                #print('----------')
-            #print(f'===={i}=====')
+                    # print(f"inserting {subst_token} at {mention.sample_index}:{start_idx}")
+                # print('----------')
+            # print(f'===={i}=====')
+
+        # trim back to max of 512 tokens
+        for i, s_input_ids in enumerate(input_ids):
+            if len(s_input_ids) > 512:  # TODO retrieve 512 number from config somewhere
+                input_ids[i] = s_input_ids[:512]
+
+        # create new attention mask
+        mask = [[1] * len(s_input_ids) for i, s_input_ids in enumerate(input_ids)]
+
+        return {'input_ids': input_ids, 'attention_mask': mask}
 
     if cli_config['experiment_version'] == 'mask':
         fn = mask_entities
@@ -128,6 +175,10 @@ if __name__ == "__main__":
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
 
     parser.add_argument('--experiment_version', choices=['mask', 'substitute'])
+    parser.add_argument('--substitute_variant', choices=[
+        'random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift'])
+
+    parser.add_argument('--do_random_baseline', action='store_true')
 
     args = parser.parse_args()
     config = create_run_folder_and_config_dict(args)
