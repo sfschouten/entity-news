@@ -1,6 +1,9 @@
 import argparse
 from collections import Counter
 import random
+import math
+
+from tqdm import tqdm
 
 from train_news_clf import train_news_clf
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
@@ -29,8 +32,9 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
         topics = samples['labels']
 
         class Mention:
-            def __init__(self, sample_index: int):
+            def __init__(self, sample_index: int, type: str):
                 self.sample_index = sample_index
+                self.type = type
                 self.token_ids = []
                 self.token_idxs = []
 
@@ -49,9 +53,10 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
         for i, (s_input_ids, s_ner_preds) in enumerate(zip(input_ids, ner_preds)):
             for j, (input_id, ner) in enumerate(zip(s_input_ids, s_ner_preds)):
                 if ner.startswith('B'):
-                    entity_mentions.append(Mention(i))
+                    entity_mentions.append(Mention(i, ner.split('-')[1]))
                     entity_mentions[-1].append(input_id, j)
-                if ner.startswith('I') and entity_mentions[-1].token_idxs[-1] == j - 1:
+                if ner.startswith('I') and entity_mentions[-1].token_idxs[-1] == j - 1 \
+                        and ner.endswith(entity_mentions[-1].type):
                     entity_mentions[-1].append(input_id, j)
 
         # count, so we can sample based on frequency
@@ -63,10 +68,21 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
             def sample_fn(mention: Mention):
                 return random.sample(vocab, len(mention.token_ids))
         elif cli_config['substitute_variant'] == 'random_mention':
-            unique = set(entity_mentions)
+            unique = list(set(entity_mentions))
 
             def sample_fn(_):
-                entity, _ = random.sample(unique, 1)[0]
+                entity = random.sample(unique, 1)[0]
+                return entity.token_ids
+        elif cli_config['substitute_variant'] == 'type_invariant':
+            by_type = {}
+            for mention in entity_mentions:
+                same_type = by_type.get(mention.type, [])
+                same_type.append(mention)
+                by_type[mention.type] = same_type
+
+            def sample_fn(mention):
+                same_type = by_type[mention.type]
+                entity = random.sample(same_type, 1)[0]
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'frequency':
             most_frequent = entity_mention_count.most_common(50)  # TODO make config option
@@ -81,13 +97,32 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 entity, _ = random.sample(most_frequent, 1)[0]
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'topic_shift':
+            D = 1e-8
             # calculate distribution over topics
-            entity_mention_topic_count = Counter([
-                (mention, topics[mention.sample_index]) for mention in entity_mentions
-            ])
+            mention_topic_counts = Counter([(m, topics[m.sample_index]) for m in entity_mentions])
+            mention_topic_dist = {}
+            for (m, t), c in mention_topic_counts.items():
+                dist = mention_topic_dist.get(m, {})
+                dist[t] = c / entity_mention_count[m]
+                mention_topic_dist[m] = dist
+
+            # calculate kl-divergences
+            def kl_divergence(p, q):
+                return sum(p[k] * math.log2(p[k] / q.get(k, D)) for k in p.keys())
+
+            # TODO redo this for feasible run time
+            mention_kls = {}
+            for mention_a, dist_a in tqdm(mention_topic_dist.items()):
+                divergences = {}
+                for mention_b, dist_b in mention_topic_dist.items():
+                    divergences[mention_b] = kl_divergence(dist_a, dist_b)
+                mention_kls[mention_a] = divergences
 
             def sample_fn(mention: Mention):
-                pass
+                highest_shift = sorted(mention_kls[mention].items(), key=lambda x: x[1])[:-50] # TODO make configurable
+                entity, _ = random.sample(highest_shift, 1)[0]
+                return entity.token_ids
+
         else:
             def sample_fn(_):
                 raise NotImplementedError()
@@ -139,7 +174,7 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     else:
         raise ValueError(f"Invalid version of experiment: {cli_config['experiment_version']}")
 
-    dataset = dataset.map(fn, batched=True).remove_columns(['ner', 'incident.wdt_id'])
+    dataset = dataset.map(fn, batched=True, batch_size=None).remove_columns(['ner', 'incident.wdt_id'])
     return dataset
 
 
