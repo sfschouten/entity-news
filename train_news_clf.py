@@ -142,9 +142,10 @@ def train_news_clf(cli_config, dataset_fn):
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
+    key = 'test' if cli_config['eval_on_test'] else 'validation'
     result = trainer.evaluate(
-        tokenized_dataset['test' if cli_config['eval_on_test'] else 'validation'],
-        metric_key_prefix='test',
+        tokenized_dataset[key],
+        metric_key_prefix=key,
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)

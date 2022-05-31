@@ -132,9 +132,10 @@ def train_entity_recognition(cli_config):
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
     print("Evaluating on CoNLL2003")
+    key = 'test' if cli_config['eval_on_test'] else 'validation'
     result = trainer.evaluate(
-        conll_dataset['test' if cli_config['eval_on_test'] else 'validation'],
-        metric_key_prefix='test_conll',
+        conll_dataset[key],
+        metric_key_prefix=f'{key}_conll',
         ignore_keys=hidden_state_keys
     )
     print(result)

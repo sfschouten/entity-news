@@ -217,13 +217,13 @@ def train_entity_recognition(cli_config):
     hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
-
+    key = 'test' if cli_config['eval_on_test'] else 'validation'
     for test_set in cli_config['test_dataset']:
         if test_set == 'kilt':
             print("Evaluating on KILT wikipedia test split.")
             result = trainer.evaluate(
-                kilt_dataset['test' if cli_config['eval_on_test'] else 'validation'],
-                metric_key_prefix='test_kilt',
+                kilt_dataset[key],
+                metric_key_prefix=f'{key}_kilt',
                 ignore_keys=hidden_state_keys,
             )
             print(result)
@@ -231,8 +231,8 @@ def train_entity_recognition(cli_config):
         if test_set == 'conll':
             print("Evaluating on CoNLL2003")
             result = trainer.evaluate(
-                conll_dataset['test' if cli_config['eval_on_test'] else 'validation'],
-                metric_key_prefix='test_conll',
+                conll_dataset[key],
+                metric_key_prefix=f'{key}_conll',
                 ignore_keys=hidden_state_keys,
             )
             print(result)
