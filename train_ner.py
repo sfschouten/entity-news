@@ -222,7 +222,7 @@ def train_entity_recognition(cli_config):
         if test_set == 'kilt':
             print("Evaluating on KILT wikipedia test split.")
             result = trainer.evaluate(
-                kilt_dataset['test'],
+                kilt_dataset['test' if cli_config['eval_on_test'] else 'validation'],
                 metric_key_prefix='test_kilt',
                 ignore_keys=hidden_state_keys,
             )
@@ -231,7 +231,7 @@ def train_entity_recognition(cli_config):
         if test_set == 'conll':
             print("Evaluating on CoNLL2003")
             result = trainer.evaluate(
-                conll_dataset['test'],
+                conll_dataset['test' if cli_config['eval_on_test'] else 'validation'],
                 metric_key_prefix='test_conll',
                 ignore_keys=hidden_state_keys,
             )
@@ -286,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
     parser.add_argument('--eval_metric', default='overall_f1', type=str)
+    parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)

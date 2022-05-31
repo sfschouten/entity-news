@@ -119,7 +119,7 @@ def train_news_clf(cli_config):
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
     result = trainer.evaluate(
-        nc_dataset['test'],
+        nc_dataset['test' if cli_config['eval_on_test'] else 'validation'],
         metric_key_prefix='test',
         ignore_keys=hidden_state_keys
     )
@@ -153,6 +153,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
     parser.add_argument('--eval_metric', default='accuracy', type=str)
+    parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)

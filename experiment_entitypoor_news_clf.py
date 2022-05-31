@@ -1,17 +1,18 @@
 import argparse
 from collections import Counter
 import random
-import math
 
+from scipy.spatial.distance import jensenshannon
 from tqdm import tqdm
 
-from train_news_clf import train_news_clf
+from train_news_clf import train_news_clf, train_news_clf_argparse
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from utils import create_run_folder_and_config_dict
 
 
 def entity_poor_news_clf_dataset(cli_config, tokenizer):
     dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
+    nr_topics = len(dataset['train'].features['labels'].names)
 
     def mask_entities(samples):
         input_ids = samples['input_ids']
@@ -85,7 +86,8 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 entity = random.sample(same_type, 1)[0]
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'frequency':
-            most_frequent = entity_mention_count.most_common(50)  # TODO make config option
+            nr_most_frequent = cli_config['nr_most_frequent']
+            most_frequent = entity_mention_count.most_common(nr_most_frequent)
 
             # print most frequent
             print(sorted([
@@ -98,31 +100,53 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'topic_shift':
             D = 1e-8
+
+            # TODO re-enable with more efficient version
+            return {}
+
             # calculate distribution over topics
             mention_topic_counts = Counter([(m, topics[m.sample_index]) for m in entity_mentions])
             mention_topic_dist = {}
             for (m, t), c in mention_topic_counts.items():
-                dist = mention_topic_dist.get(m, {})
+                dist = mention_topic_dist.get(m, [D] * nr_topics)
                 dist[t] = c / entity_mention_count[m]
                 mention_topic_dist[m] = dist
 
-            # calculate kl-divergences
-            def kl_divergence(p, q):
-                return sum(p[k] * math.log2(p[k] / q.get(k, D)) for k in p.keys())
+            # we are looking for mentions that occur in very particular topics
+            # ...
+            mention_sort_idxs = [None] * nr_topics
+            for t in range(nr_topics):
+                mention_sort_idxs[t] = sorted(
+                    mention_topic_dist.keys(),
+                    key=lambda m: mention_topic_dist[m][t],
+                    reverse=True
+                )
 
-            # TODO redo this for feasible run time
+            def invert_probability_vector(p):
+                indxs, values = zip(*sorted(enumerate(p), key=lambda p_: p_[1]))
+                _, inv = zip(*sorted(zip(indxs, reversed(values)), key=lambda p_: p_[0]))
+                return inv
+
+            C = 50  # nr of candidates
+            for i, (m, p) in enumerate(mention_topic_dist.items()):
+                candidates = []
+                for t in range(nr_topics):
+                    p_inv = invert_probability_vector(p)
+                    M_d = int(p_inv[t] * C)
+                    candidates.extend(mention_sort_idxs[t][:M_d])
+
             mention_kls = {}
             for mention_a, dist_a in tqdm(mention_topic_dist.items()):
                 divergences = {}
                 for mention_b, dist_b in mention_topic_dist.items():
-                    divergences[mention_b] = kl_divergence(dist_a, dist_b)
+                    divergences[mention_b] = jensenshannon(dist_a, dist_b)
                 mention_kls[mention_a] = divergences
 
             def sample_fn(mention: Mention):
-                highest_shift = sorted(mention_kls[mention].items(), key=lambda x: x[1])[:-50] # TODO make configurable
+                highest_shift = sorted(mention_kls[mention].items(), key=lambda x: x[1])[
+                                :-50]  # TODO make configurable
                 entity, _ = random.sample(highest_shift, 1)[0]
                 return entity.token_ids
-
         else:
             def sample_fn(_):
                 raise NotImplementedError()
@@ -174,47 +198,41 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     else:
         raise ValueError(f"Invalid version of experiment: {cli_config['experiment_version']}")
 
-    dataset = dataset.map(fn, batched=True, batch_size=None).remove_columns(['ner', 'incident.wdt_id'])
+    dataset = dataset.map(fn, batched=True, batch_size=None).remove_columns(
+        ['ner', 'incident.wdt_id'])
     return dataset
 
 
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--report_to', default=None, type=str)
+    parser = train_news_clf_argparse(parser)
 
-    parser.add_argument('--nc_data_folder', default="../data/minimal")
+    versions = ['mask', 'substitute']
+    parser.add_argument('--experiment_version', choices=versions)
 
-    parser.add_argument('--mwep_home', default='../mwep')
-    parser.add_argument('--runs_folder', default='runs')
-    parser.add_argument('--run_name', default=None)
+    # if experiment_version = substitute
+    sub_variants = ['random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift']
+    parser.add_argument('--substitute_variant', choices=sub_variants)
 
-    parser.add_argument('--model', default="distilbert-base-cased")
-    parser.add_argument('--probing', action='store_true')
-    parser.add_argument('--head_id', default='nc-0', type=str)
+    # if substitute_variant = frequency
+    parser.add_argument('--nr_most_frequent', default=100, type=int)
 
-    parser.add_argument('--checkpoint', default=None)
-    parser.add_argument('--continue', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
-
-    parser.add_argument('--eval_strategy', default='steps', type=str)
-    parser.add_argument('--eval_frequency', default=500, type=int)
-    parser.add_argument('--eval_metric', default='accuracy', type=str)
-
-    # hyper-parameters
-    parser.add_argument('--max_nr_epochs', default=100, type=int)
-    parser.add_argument('--warmup_steps', default=2000, type=int)
-    parser.add_argument('--early_stopping_patience', default=5, type=int)
-    parser.add_argument('--batch_size_train', default=64, type=int)
-    parser.add_argument('--batch_size_eval', default=64, type=int)
-    parser.add_argument('--gradient_acc_steps', default=1, type=int)
-
-    parser.add_argument('--experiment_version', choices=['mask', 'substitute'])
-    parser.add_argument('--substitute_variant', choices=[
-        'random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift'])
-
-    parser.add_argument('--do_random_baseline', action='store_true')
+    # special option to run all experiment variants
+    parser.add_argument('--run_all_variants', action='store_true')
 
     args = parser.parse_args()
-    config = create_run_folder_and_config_dict(args)
-    train_news_clf(config, entity_poor_news_clf_dataset)
+
+    if args.run_all_variants:
+        all_variants = [
+            {'experiment_version': 'substitute', 'substitute_variant': x} for x in sub_variants
+        ] + [{'experiment_version': 'mask'}]
+
+        for dict in all_variants:
+            for key, value in dict.items():
+                setattr(args, key, value)
+            config = create_run_folder_and_config_dict(args)
+            train_news_clf(config, entity_poor_news_clf_dataset)
+    else:
+        config = create_run_folder_and_config_dict(args)
+        train_news_clf(config, entity_poor_news_clf_dataset)

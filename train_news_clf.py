@@ -49,9 +49,12 @@ def news_clf_dataset(config, tokenizer):
     return tokenized_dataset
 
 
-def compute_news_clf_metrics(acc_metric, class_names, eval_pred):
+def compute_news_clf_metrics(cli_config, acc_metric, class_names, eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
+
+    # store predictions to text file for later analysis
+    np.savetxt(cli_config['run_path'] + '/logits.txt', logits)
 
     print(metrics.classification_report(labels, preds, target_names=class_names))
     clf_report_dct = metrics.classification_report(
@@ -120,7 +123,8 @@ def train_news_clf(cli_config, dataset_fn):
         args=training_args,
         train_dataset=tokenized_dataset['train'],
         eval_dataset=tokenized_dataset['validation'],
-        compute_metrics=partial(compute_news_clf_metrics, load_metric('accuracy'), class_names),
+        compute_metrics=partial(
+            compute_news_clf_metrics, cli_config, load_metric('accuracy'), class_names),
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],
@@ -139,16 +143,14 @@ def train_news_clf(cli_config, dataset_fn):
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
     result = trainer.evaluate(
-        tokenized_dataset['test'],
+        tokenized_dataset['test' if cli_config['eval_on_test'] else 'validation'],
         metric_key_prefix='test',
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)
 
 
-if __name__ == "__main__":
-    # parse cmdline arguments
-    parser = argparse.ArgumentParser()
+def train_news_clf_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--report_to', default=None, type=str)
 
     parser.add_argument('--nc_data_folder', default="../data/minimal")
@@ -168,6 +170,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
     parser.add_argument('--eval_metric', default='accuracy', type=str)
+    parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
@@ -176,8 +179,13 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
-    # parser.add_argument('--learning_rate_base', default=1e-4, type=float)
-    # parser.add_argument('--learning_rate_head', default=1e-3, type=float)
+    return parser
 
+
+if __name__ == "__main__":
+    # parse cmdline arguments
+    parser = argparse.ArgumentParser()
+    parser = train_news_clf_argparse(parser)
     args = parser.parse_args()
+
     train_news_clf(create_run_folder_and_config_dict(args), news_clf_dataset)
