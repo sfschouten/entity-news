@@ -2,6 +2,7 @@ import argparse
 from collections import Counter
 import random
 
+import wandb
 from scipy.spatial.distance import jensenshannon
 from tqdm import tqdm
 
@@ -232,7 +233,9 @@ if __name__ == "__main__":
             for key, value in dict.items():
                 setattr(args, key, value)
             config = create_run_folder_and_config_dict(args)
+            run = wandb.init(reinit=True, tags=['EntityPoor'])
             train_news_clf(config, entity_poor_news_clf_dataset)
+            run.finish()
     else:
         config = create_run_folder_and_config_dict(args)
         train_news_clf(config, entity_poor_news_clf_dataset)
