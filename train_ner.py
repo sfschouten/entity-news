@@ -238,6 +238,7 @@ def train_entity_recognition(cli_config):
         if test_set == 'mwep_w/ots-nerc':
             pass
 
+
 def sanity_check_kilt_iob_labels(cli_config):
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 

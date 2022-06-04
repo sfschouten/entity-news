@@ -30,7 +30,7 @@ def mwep_silver_ner(cli_config, tokenizer):
 
 def train_nerc_and_analyze(cli_config):
 
-    cli_config['test_datasets'] = ['mwep_silver_ner']
+    cli_config['eval_datasets'] = ['mwep_silver_ner']
 
     # train probe
     train_entity_recognition(cli_config, {

@@ -18,7 +18,7 @@ from sklearn import metrics
 
 def conll2003_dataset(config, tokenizer):
     def labels(example, batch_encoding: BatchEncoding):
-        words = batch_encoding.words()  # maps tokens to word indices
+        words = batch_encoding.word_ids()  # maps tokens to word indices
         labels_ = [example['ner_tags'][w] if w is not None else 0 for w in words]
         # only label first token of each word
         labels_ = [label if cw != pw else -100
@@ -161,7 +161,7 @@ def train_nerc_argparse(parser: argparse.ArgumentParser):
     # dataset
     parser.add_argument('--train_dataset', choices=['conll'], default='conll')
     parser.add_argument('--valid_dataset', choices=['conll'], default='conll')
-    parser.add_argument('--test_dataset', choices=['conll'], default=['conll'], nargs='*')
+    parser.add_argument('--eval_datasets', choices=['conll'], default=['conll'], nargs='*')
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
