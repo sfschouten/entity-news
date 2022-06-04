@@ -44,7 +44,7 @@ def compute_nerc_metrics(cli_config, seq_metric, eval_pred):
     TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 
     logits, labels = eval_pred
-    np.save(cli_config['run_path'] + '/logits.txt', logits)
+    np.save(cli_config['run_path'] + '/logits.npy', logits)
 
     preds = np.argmax(logits, axis=-1)
 
@@ -70,14 +70,14 @@ def compute_nerc_metrics(cli_config, seq_metric, eval_pred):
     return er_result
 
 
-def train_entity_recognition(cli_config, dataset_fn):
+def train_entity_recognition(cli_config, dataset_fns):
     wandb.init(project='entity-news', tags=['NERC'])
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
     # dataset
-    dataset = dataset_fn(cli_config, tokenizer)
-    dataset = dataset.rename_column('labels', 'nerc_labels')
+    datasets = {key: fn(cli_config, tokenizer) for key, fn in dataset_fns.items()}
+    datasets = {key: dset.rename_column('labels', 'nerc_labels') for key, dset in datasets.items()}
 
     # load model
     head_id = cli_config['head_id']
@@ -112,8 +112,8 @@ def train_entity_recognition(cli_config, dataset_fn):
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset['train'],
-        eval_dataset=dataset['validation'],
+        train_dataset=datasets[cli_config['train_dataset']]['train'],
+        eval_dataset=datasets[cli_config['valid_dataset']]['validation'],
         compute_metrics=partial(compute_nerc_metrics, cli_config, load_metric('seqeval')),
         data_collator=DataCollatorForTokenClassification(
             tokenizer=tokenizer,
@@ -133,12 +133,13 @@ def train_entity_recognition(cli_config, dataset_fn):
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
-    key = 'test' if cli_config['eval_on_test'] else 'validation'
-    result = trainer.evaluate(
-        dataset[key],
-        metric_key_prefix=f'{key}/conll',
-        ignore_keys=hidden_state_keys
-    )
+    for eval_dataset in cli_config['eval_datasets']:
+        key = 'test' if cli_config['eval_on_test'] else 'validation'
+        result = trainer.evaluate(
+            datasets[eval_dataset][key],
+            metric_key_prefix=f'{key}/{eval_dataset}',
+            ignore_keys=hidden_state_keys
+        )
     print(result)
 
 
@@ -156,6 +157,11 @@ def train_nerc_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
     parser.add_argument('--eval_only', action='store_true')
+
+    # dataset
+    parser.add_argument('--train_dataset', choices=['conll'], default='conll')
+    parser.add_argument('--valid_dataset', choices=['conll'], default='conll')
+    parser.add_argument('--test_dataset', choices=['conll'], default=['conll'], nargs='*')
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
@@ -178,5 +184,5 @@ if __name__ == "__main__":
     parser = train_nerc_argparse(parser)
     args = parser.parse_args()
     train_entity_recognition(
-        create_run_folder_and_config_dict(args), conll2003_dataset
+        create_run_folder_and_config_dict(args), {'conll': conll2003_dataset}
     )

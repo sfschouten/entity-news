@@ -7,7 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
-from train_nerc import train_nerc_argparse, train_entity_recognition
+from train_nerc import train_nerc_argparse, train_entity_recognition, conll2003_dataset
 from utils import create_run_folder_and_config_dict
 from utils_mentions import samples_to_mentions, mentions_by_sample
 
@@ -29,11 +29,17 @@ def mwep_silver_ner(cli_config, tokenizer):
 
 
 def train_nerc_and_analyze(cli_config):
+
+    cli_config['test_datasets'] = ['mwep_silver_ner']
+
     # train probe
-    train_entity_recognition(cli_config, mwep_silver_ner)
+    train_entity_recognition(cli_config, {
+        'conll': conll2003_dataset,
+        'mwep_silver_ner': mwep_silver_ner
+    })
 
     # read in predictions of probe
-    eval_logits = np.load(cli_config['run_path'] + '/logits.txt')
+    eval_logits = np.load(cli_config['run_path'] + '/logits.npy')
 
     # read in MWEP with silver-standard NERC labels
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
