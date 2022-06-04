@@ -40,18 +40,19 @@ def train_nerc_and_analyze(cli_config):
 
     # read in predictions of probe
     eval_logits = np.load(cli_config['run_path'] + '/logits.npy')
+    eval_logits = None
 
     # read in MWEP with silver-standard NERC labels
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
     key = 'test' if cli_config['eval_on_test'] else 'validation'
-    dataset = mwep_silver_ner(cli_config, tokenizer)[key]
+    dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)[key]
 
     correctness_vs_frequency = []
 
     def calc_frequencies(samples):
         entity_mentions = samples_to_mentions(samples)
         entity_mention_count = Counter(entity_mentions)
-        entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(samples))
+        entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(samples['input_ids']))
 
         for mentions, logits in zip(entity_mentions_by_sample, eval_logits):
             for mention in mentions:
