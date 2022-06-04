@@ -44,7 +44,7 @@ def compute_nerc_metrics(cli_config, seq_metric, eval_pred):
     TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 
     logits, labels = eval_pred
-    np.savetxt(cli_config['run_path'] + '/logits.txt', logits)
+    np.save(cli_config['run_path'] + '/logits.txt', logits)
 
     preds = np.argmax(logits, axis=-1)
 

@@ -33,13 +33,12 @@ def train_nerc_and_analyze(cli_config):
     train_entity_recognition(cli_config, mwep_silver_ner)
 
     # read in predictions of probe
-    eval_logits = np.loadtxt(cli_config['run_path'] + '/logits.txt')
+    eval_logits = np.load(cli_config['run_path'] + '/logits.txt')
 
     # read in MWEP with silver-standard NERC labels
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     dataset = mwep_silver_ner(cli_config, tokenizer)[key]
-
 
     correctness_vs_frequency = []
 
