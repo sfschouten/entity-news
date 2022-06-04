@@ -40,7 +40,6 @@ def train_nerc_and_analyze(cli_config):
 
     # read in predictions of probe
     eval_logits = np.load(cli_config['run_path'] + '/logits.npy')
-    eval_logits = None
 
     # read in MWEP with silver-standard NERC labels
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
