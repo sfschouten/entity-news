@@ -40,10 +40,12 @@ def conll2003_dataset(config, tokenizer):
     return dataset
 
 
-def compute_nerc_metrics(seq_metric, eval_pred):
+def compute_nerc_metrics(cli_config, seq_metric, eval_pred):
     TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 
     logits, labels = eval_pred
+    np.savetxt(cli_config['run_path'] + '/logits.txt', logits)
+
     preds = np.argmax(logits, axis=-1)
 
     cf_labels = labels[labels != -100]
@@ -68,14 +70,14 @@ def compute_nerc_metrics(seq_metric, eval_pred):
     return er_result
 
 
-def train_entity_recognition(cli_config):
+def train_entity_recognition(cli_config, dataset_fn):
     wandb.init(project='entity-news', tags=['NERC'])
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
-    # conll2003 dataset
-    conll_dataset = conll2003_dataset(cli_config, tokenizer)
-    conll_dataset = conll_dataset.rename_column('labels', 'nerc_labels')
+    # dataset
+    dataset = dataset_fn(cli_config, tokenizer)
+    dataset = dataset.rename_column('labels', 'nerc_labels')
 
     # load model
     head_id = cli_config['head_id']
@@ -110,9 +112,9 @@ def train_entity_recognition(cli_config):
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=conll_dataset['train'],
-        eval_dataset=conll_dataset['validation'],
-        compute_metrics=partial(compute_nerc_metrics, load_metric('seqeval')),
+        train_dataset=dataset['train'],
+        eval_dataset=dataset['validation'],
+        compute_metrics=partial(compute_nerc_metrics, cli_config, load_metric('seqeval')),
         data_collator=DataCollatorForTokenClassification(
             tokenizer=tokenizer,
             label_name='nerc_labels'
@@ -131,20 +133,16 @@ def train_entity_recognition(cli_config):
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
 
-    print("Evaluating on CoNLL2003")
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     result = trainer.evaluate(
-        conll_dataset[key],
-        metric_key_prefix=f'{key}_conll',
+        dataset[key],
+        metric_key_prefix=f'{key}/conll',
         ignore_keys=hidden_state_keys
     )
     print(result)
 
 
-if __name__ == "__main__":
-    # parse cmdline arguments
-    parser = argparse.ArgumentParser()
-
+def train_nerc_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--report_to', default=None, type=str)
 
     parser.add_argument('--runs_folder', default='runs')
@@ -171,8 +169,14 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
+    return parser
 
+
+if __name__ == "__main__":
+    # parse cmdline arguments
+    parser = argparse.ArgumentParser()
+    parser = train_nerc_argparse(parser)
     args = parser.parse_args()
     train_entity_recognition(
-        create_run_folder_and_config_dict(args)
+        create_run_folder_and_config_dict(args), conll2003_dataset
     )

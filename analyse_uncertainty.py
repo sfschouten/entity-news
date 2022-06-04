@@ -3,6 +3,8 @@ import sys
 from tqdm import tqdm
 from scipy.special import softmax, gammaln, digamma
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from dirichlet import mle, dirichlet
 
@@ -24,13 +26,13 @@ def calc_entropy(alphas):
     psi_alphas = digamma(alphas)
 
     def log_multivariate_beta(values):
-        return gammaln(values).sum(axis=-1) - gammaln(values.sum(axis=-1))
+        return gammaln(values).sum(axis=-1, keepdims=True) - gammaln(values.sum(axis=-1, keepdims=True))
 
     entropy = log_multivariate_beta(alphas)         \
         + (alpha_0 - K) * psi_alpha_0               \
         - ((alphas - 1) * psi_alphas).sum(axis=-1, keepdims=True)
-    
-    return entropy 
+
+    return entropy.squeeze()
 
 
 if __name__ == "__main__":
@@ -69,11 +71,15 @@ if __name__ == "__main__":
 
     print("calculating variance and entropy")
     alphas = np.stack(all_alphas)
+
     variances = calc_variance(alphas)
     entropies = calc_entropy(alphas)
 
     print(f"Mean variance is {variances.mean()}; with standard deviation of {variances.std()} .")
     print(f"Mean entropy is {entropies.mean()}; with standard deviation of {entropies.std()} .")
+
+    sns.kdeplot(data=entropies)
+    plt.savefig("entropies.png")
 
 
 

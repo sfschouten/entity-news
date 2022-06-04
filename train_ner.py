@@ -220,14 +220,13 @@ def train_entity_recognition(cli_config):
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     for test_set in cli_config['test_dataset']:
         if test_set == 'kilt':
-            print("Evaluating on KILT wikipedia test split.")
+            print(f"Evaluating on KILT wikipedia {key} split.")
             result = trainer.evaluate(
                 kilt_dataset[key],
                 metric_key_prefix=f'{key}_kilt',
                 ignore_keys=hidden_state_keys,
             )
             print(result)
-
         if test_set == 'conll':
             print("Evaluating on CoNLL2003")
             result = trainer.evaluate(
@@ -236,7 +235,8 @@ def train_entity_recognition(cli_config):
                 ignore_keys=hidden_state_keys,
             )
             print(result)
-
+        if test_set == 'mwep_w/ots-nerc':
+            pass
 
 def sanity_check_kilt_iob_labels(cli_config):
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])

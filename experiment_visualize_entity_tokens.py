@@ -97,14 +97,14 @@ def create_tsne(cli_config):
         heads
     )
 
-    entity_repr: ArrayLike = None
-    entity_topics: ArrayLike = None
-    entity_samples: ArrayLike = None
-    entity_incidents: ArrayLike = None
-    entity_tokens: ArrayLike = None
-    entity_ots_preds: ArrayLike = None
-    entity_validity: ArrayLike = None
-    entity_confidence: ArrayLike = None
+    entity_repr: ArrayLike = None           # vector representation of entity token
+    entity_topics: ArrayLike = None         # topic of the article that contained the entity mention
+    entity_samples: ArrayLike = None        # index of the article              "
+    entity_incidents: ArrayLike = None      # incident of the article           "
+    entity_tokens: ArrayLike = None         # vocab id of token
+    entity_ots_preds: ArrayLike = None      # off-the-shelf prediction of entity type
+    entity_validity: ArrayLike = None       #
+    entity_confidence: ArrayLike = None     #
 
     def _list_of_lists_to_np_array(list_of_lists, max_len=512):
         return np.array([
@@ -247,8 +247,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--nc_data_folder', default="../data/medium_plus")
-
     parser.add_argument('--mwep_home', default='../mwep')
+
     parser.add_argument('--runs_folder', default='runs')
     parser.add_argument('--run_name', default=None)
 
