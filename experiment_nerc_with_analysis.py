@@ -56,7 +56,9 @@ def train_nerc_and_analyze(cli_config):
         for mentions, logits in zip(entity_mentions_by_sample, eval_logits):
             for mention in mentions:
                 freq = entity_mention_count[mention]
-                prob = logits[TAG2IDX[mention.type]]
+                prob = logits[TAG2IDX['B-'+mention.type]]
+                prob += (len(mention.token_ids)-1) * logits[TAG2IDX['I-'+mention.type]]
+                prob /= len(mention.token_ids)
                 correctness_vs_frequency.append((freq, prob))
 
     dataset.map(calc_frequencies, batched=True, batch_size=None)
