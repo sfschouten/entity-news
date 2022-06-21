@@ -58,3 +58,15 @@ def mentions_by_sample(mentions, nr_samples):
 
     return entity_mentions_by_sample
 
+
+def mention_topic_dist(mentions, topics, nr_topics):
+    D = 1e-8
+    entity_mention_count = Counter(mentions)
+    mention_topic_counts = Counter([(m, topics[m.sample_index]) for m in mentions])
+    mention_topic_dist = {}
+    for (m, t), c in mention_topic_counts.items():
+        dist = mention_topic_dist.get(m, [D] * nr_topics)
+        dist[t] = c / entity_mention_count[m]
+        mention_topic_dist[m] = dist
+
+    return mention_topic_dist

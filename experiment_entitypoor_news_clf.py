@@ -30,17 +30,15 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
 
     def substitute_entities(samples):
         nonlocal tokenizer
-        topics = samples['labels']
         entity_mentions = samples_to_mentions(samples)
-
-        # count, so we can sample based on frequency
-        entity_mention_count = Counter(entity_mentions)
 
         if cli_config['substitute_variant'] == 'random_tokens':
             vocab = list(tokenizer.vocab.values())
+            unique = list(set(entity_mentions))
 
             def sample_fn(mention: Mention):
-                return random.sample(vocab, len(mention.token_ids))
+                entity = random.sample(unique, 1)[0]
+                return random.sample(vocab, len(entity.token_ids))
         elif cli_config['substitute_variant'] == 'random_mention':
             unique = list(set(entity_mentions))
 
@@ -60,7 +58,7 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'frequency':
             nr_most_frequent = cli_config['nr_most_frequent']
-            most_frequent = entity_mention_count.most_common(nr_most_frequent)
+            most_frequent = Counter(entity_mentions).most_common(nr_most_frequent)
 
             # print most frequent
             print(sorted([
@@ -72,18 +70,13 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 entity, _ = random.sample(most_frequent, 1)[0]
                 return entity.token_ids
         elif cli_config['substitute_variant'] == 'topic_shift':
-            D = 1e-8
 
             # TODO re-enable with more efficient version
             return {}
 
             # calculate distribution over topics
-            mention_topic_counts = Counter([(m, topics[m.sample_index]) for m in entity_mentions])
-            mention_topic_dist = {}
-            for (m, t), c in mention_topic_counts.items():
-                dist = mention_topic_dist.get(m, [D] * nr_topics)
-                dist[t] = c / entity_mention_count[m]
-                mention_topic_dist[m] = dist
+            topics = samples['labels']
+            mention_topic_dist = mention_topic_dist(entity_mentions, topics, nr_topics)
 
             # we are looking for mentions that occur in very particular topics
             # ...
@@ -124,6 +117,7 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
             def sample_fn(_):
                 raise NotImplementedError()
 
+        input_ids = samples['input_ids']
         entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(input_ids))
 
         # make the substitutions

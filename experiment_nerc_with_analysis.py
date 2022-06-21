@@ -3,13 +3,15 @@ from collections import Counter
 
 from transformers import AutoTokenizer
 import numpy as np
+from scipy.stats import entropy
+
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from train_nerc import train_nerc_argparse, train_entity_recognition, conll2003_dataset
 from utils import create_run_folder_and_config_dict
-from utils_mentions import samples_to_mentions, mentions_by_sample
+from utils_mentions import samples_to_mentions, mentions_by_sample, mention_topic_dist
 
 TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 TAG2IDX = {tag: idx for idx, tag in enumerate(TAGS)}
@@ -49,48 +51,105 @@ def train_nerc_and_analyze(cli_config):
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)[key]
+    nr_topics = len(dataset.features['labels'].names)
 
-    correctness_vs_frequency = []
+    metrics = []
     types = []
 
-    def calc_frequencies(samples):
+    def calc_metrics(samples):
         entity_mentions = samples_to_mentions(samples)
         entity_mention_count = Counter(entity_mentions)
         entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(samples['input_ids']))
 
+        topics = samples['labels']
+        topic_dists = mention_topic_dist(entity_mentions, topics, nr_topics)
+
         for mentions, logits in zip(entity_mentions_by_sample, eval_logits):
             for mention in mentions:
-                log_freq = np.log(entity_mention_count[mention])
                 mention_acc_a = np.argmax(logits[mention.token_idxs[0]]) == TAG2IDX['B-'+mention.type]
                 mention_acc_b = sum(
                     np.argmax(logits[i]) == TAG2IDX['I-'+mention.type]
                     for i in mention.token_idxs[1:]
                 )
                 mention_acc = mention_acc_a and mention_acc_b == len(mention.token_idxs[1:])
-                correctness_vs_frequency.append([log_freq, mention_acc])
+                metrics.append([
+                    entity_mention_count[mention],
+                    entropy(topic_dists[mention]),
+                    mention_acc
+                ])
                 types.append(mention.type)
 
-    dataset.map(calc_frequencies, batched=True, batch_size=None)
-    correct_vs_freq = np.array(correctness_vs_frequency).T
+    dataset.map(calc_metrics, batched=True, batch_size=None)
+    metrics_arr = np.array(metrics)
 
-    # report correlation between correctness of probe-prediction vs. frequency
-    log_freq, correct = correct_vs_freq[0, :], correct_vs_freq[1, :]
-    sns.violinplot(x=log_freq, y=correct, orient='h', inner='box')
+    # correctness probe-prediction vs. frequency
+    freq, topic_entropy, correct = metrics_arr[:, 0], metrics_arr[:, 1], metrics_arr[:, 2]
+    plt.xlim(0, 600)
+    sns.violinplot(x=freq, y=correct, orient='h', inner='box')
+    plt.xlabel('Frequency')
+    plt.yticks(np.array([0, 1]), ['Incorrect', 'Correct'])
+    plt.tight_layout()
     plt.savefig(cli_config['run_path'] + '/correct_freq_violin.png')
     plt.clf()
-    sns.violinplot(x=log_freq, y=correct, orient='h', inner='box', hue=types)
-    plt.savefig(cli_config['run_path'] + '/correct_freq_type_violins.png')
 
-    true_mean = log_freq[correct == 1].mean()
-    false_mean = log_freq[correct == 0].mean()
-    true_std = log_freq[correct == 1].std()
-    false_std = log_freq[correct == 0].std()
-    true_stderr = true_std / np.sqrt((correct == 1).sum())
-    false_stderr = false_std / np.sqrt((correct == 0).sum())
-    print(f"True mean: {true_mean}, False mean: {false_mean}")
-    print(f"True std: {true_std}, False std: {false_std}")
-    print(f"True stderr: {true_stderr}, False stderr: {false_stderr}")
+    #sns.violinplot(x=freq, y=correct, orient='h', inner='box', hue=types)
+    #plt.savefig(cli_config['run_path'] + '/correct_freq_type_violins.png')
+    #plt.clf()
 
+    draw_histwithmean(np.log(freq), correct, nr_bins=6,
+                      labels_fn=lambda bins: map('{:.01f}'.format, np.exp(bins)))
+    plt.xlabel('Frequency')
+    plt.ylabel('Accuracy')
+    plt.tight_layout()
+    plt.savefig(cli_config['run_path'] + '/correct_freq_hist.png')
+    plt.clf()
+
+    calc_meantest(freq, correct)
+
+    # correctness probe-prediction vs. topic distribution entropy
+    sns.violinplot(x=topic_entropy, y=correct, orient='h', inner='box')
+    plt.xlabel('Entropy')
+    plt.yticks(np.array([0, 1]), ['Incorrect', 'Correct'])
+    plt.tight_layout()
+    plt.savefig(cli_config['run_path'] + '/correct_entropy_violin.png')
+    plt.clf()
+
+    draw_histwithmean(topic_entropy, correct)
+    plt.xlabel('Entropy')
+    plt.ylabel('Accuracy')
+    plt.tight_layout()
+    plt.savefig(cli_config['run_path'] + '/correct_entropy_hist.png')
+    plt.clf()
+
+    calc_meantest(topic_entropy, correct)
+
+
+def draw_histwithmean(variable, correct, nr_bins=6, labels_fn=lambda _: None):
+    bins = np.linspace(variable.min(), variable.max() + 1e-12, nr_bins + 1)
+    c = np.digitize(variable, bins)
+    means = [np.mean(correct[c == i]) for i in range(1, len(bins))]
+    stderrs = [1.96 * np.std(correct[c == i]) / np.sqrt(np.sum(c == i)) for i in range(1, len(bins))]
+    plt.bar(bins[:-1], means, width=bins[1] - bins[0], align='edge', ec='black', yerr=stderrs)
+    plt.xticks(bins, labels=labels_fn(bins), rotation=45)
+    plt.margins(x=0.02)
+    print(f'bins: {bins}')
+    print(f'means: {means}')
+    print(f'std err: {stderrs}')
+    print()
+
+
+def calc_meantest(variable, correct):
+    true_var_mean = variable[correct == 1].mean()
+    false_var_mean = variable[correct == 0].mean()
+    true_var_std = variable[correct == 1].std()
+    false_var_std = variable[correct == 0].std()
+    true_var_stderr = true_var_std / np.sqrt((correct == 1).sum())
+    false_var_stderr = false_var_std / np.sqrt((correct == 0).sum())
+    print("(Intermediate) results of calculations...")
+    print(f"True mean: {true_var_mean}, False mean: {false_var_mean}")
+    print(f"True std: {true_var_std}, False std: {false_var_std}")
+    print(f"True stderr: {true_var_stderr}, False stderr: {false_var_stderr}")
+    print()
 
 
 if __name__ == "__main__":
