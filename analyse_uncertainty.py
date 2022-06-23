@@ -78,6 +78,8 @@ if __name__ == "__main__":
     print(f"Mean variance is {variances.mean()}; with standard deviation of {variances.std()} .")
     print(f"Mean entropy is {entropies.mean()}; with standard deviation of {entropies.std()} .")
 
+    np.save("entropies.npy", entropies)
+
     sns.kdeplot(data=entropies)
     plt.savefig("entropies.png")
 
