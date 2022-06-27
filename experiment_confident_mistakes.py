@@ -1,8 +1,10 @@
 import argparse
+from collections import Counter
 
 import numpy as np
 from transformers import AutoTokenizer
 
+from experiment_entitypoor_news_clf import entity_poor_news_clf_dataset
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from utils import create_run_folder_and_config_dict
 
@@ -11,8 +13,17 @@ def analyse(cli_config):
 
     # load dataset (valid/test split)
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
-    dataset = dataset['test' if cli_config['eval_on_test'] else 'validation']
+    dataset1 = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
+    cli_config['experiment_version'] = 'substitute'
+    cli_config['substitute_variant'] = 'random_tokens'
+    dataset2 = entity_poor_news_clf_dataset(cli_config, tokenizer)
+
+    labels1 = dataset1['validation']['labels']
+    labels2 = dataset2['validation']['labels']
+    print(labels1 == labels2)
+    print(sum(x==y for x,y in zip(labels1, labels2)))
+
+    dataset = dataset1['test' if cli_config['eval_on_test'] else 'validation']
 
     logits_paths = cli_config['logits_paths']
     entropies_path = cli_config['entropies_path']
@@ -28,6 +39,7 @@ def analyse(cli_config):
     eval_entropies = np.load(entropies_path)
 
     relevant_samples = []
+    predictions = []
 
     def find_relevant(dataset):
         nonlocal relevant_samples
@@ -35,8 +47,7 @@ def analyse(cli_config):
                                                      eval_logits, eval_entropies):
             # argmax logits
             pred = np.argmax(np.mean(logits, axis=0))
-            #pred = np.argmax(logits, axis=1)
-            #print(pred, label)
+            predictions.append((pred, label))
             if pred != label:
                 relevant_samples.append((input_ids, entropy))
 
@@ -44,6 +55,8 @@ def analyse(cli_config):
         relevant_samples = sorted(relevant_samples, key=lambda x: x[1])
 
     dataset.map(find_relevant, batched=True, batch_size=None)
+
+    print(Counter(predictions))
 
     print(len(relevant_samples))
 

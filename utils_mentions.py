@@ -1,3 +1,5 @@
+from collections import Counter
+
 
 class Mention:
     def __init__(self, sample_index: int, type: str):

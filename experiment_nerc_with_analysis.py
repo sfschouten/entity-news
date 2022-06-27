@@ -75,15 +75,21 @@ def train_nerc_and_analyze(cli_config):
                 metrics.append([
                     entity_mention_count[mention],
                     entropy(topic_dists[mention]),
-                    mention_acc
+                    mention_acc,        # true accuracy, requiring full mention to be tagged
+                    mention_acc_a       # only B-tag required
                 ])
                 types.append(mention.type)
 
     dataset.map(calc_metrics, batched=True, batch_size=None)
     metrics_arr = np.array(metrics)
 
-    # correctness probe-prediction vs. frequency
-    freq, topic_entropy, correct = metrics_arr[:, 0], metrics_arr[:, 1], metrics_arr[:, 2]
+    # accuracy probe vs. frequency
+    #freq, topic_entropy, correct, b_correct = metrics_arr[:, 0], metrics_arr[:, 1], \
+    #                                          metrics_arr[:, 2], metrics_arr[:, 3]
+    freq, topic_entropy, _, correct = [
+        np.squeeze(subarr) for subarr in np.split(metrics_arr, 4, axis=1)]
+
+    # violin plot
     plt.xlim(0, 600)
     sns.violinplot(x=freq, y=correct, orient='h', inner='box')
     plt.xlabel('Frequency')
@@ -96,6 +102,7 @@ def train_nerc_and_analyze(cli_config):
     #plt.savefig(cli_config['run_path'] + '/correct_freq_type_violins.png')
     #plt.clf()
 
+    #  histogram
     draw_histwithmean(np.log(freq), correct, nr_bins=6,
                       labels_fn=lambda bins: map('{:.01f}'.format, np.exp(bins)))
     plt.xlabel('Frequency')
@@ -106,7 +113,7 @@ def train_nerc_and_analyze(cli_config):
 
     calc_meantest(freq, correct)
 
-    # correctness probe-prediction vs. topic distribution entropy
+    # accuracy probe vs. topic distribution entropy
     sns.violinplot(x=topic_entropy, y=correct, orient='h', inner='box')
     plt.xlabel('Entropy')
     plt.yticks(np.array([0, 1]), ['Incorrect', 'Correct'])
