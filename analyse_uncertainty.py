@@ -1,7 +1,8 @@
 import sys
 
 from tqdm import tqdm
-from scipy.special import softmax, gammaln, digamma
+from scipy.special import softmax, gammaln, digamma, rel_entr
+
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -35,17 +36,9 @@ def calc_entropy(alphas):
     return entropy.squeeze()
 
 
-if __name__ == "__main__":
-
-    logits = []
-    for i, arg in enumerate(sys.argv[1:]):
-        print(f"loading {arg}")
-        logits_ = np.loadtxt(arg)
-        logits.append(logits_)
-
-    logits = np.stack(logits, axis=1) # N, M, K
-    N, M, K = logits.shape
-
+def ml_dirichlet_based_uncertainty(logits):
+    """
+    """
     print("calculating MLE Dirichlet distribution parameters")
     all_alphas = []
     for M_logits in tqdm(logits):
@@ -84,5 +77,43 @@ if __name__ == "__main__":
     plt.savefig("entropies.png")
 
 
+def lakshminarayanan_uncertainty(logits):
+    """
+    """
+
+    predictions = softmax(logits, axis=-1)
+
+    # average over model instances to obtain ensemble prediction
+    prediction_E = predictions.mean(axis=1)
+
+    # calculate kl divergence between predictions and ensemble prediction 
+    divergences = rel_entr(predictions.swapaxes(0,1), prediction_E).sum(-1)
+
+    # average over model instances to obtain disagreements
+    disagreements = divergences.mean(axis=0)
+
+
+    print(f"Mean disagreement is {disagreements.mean()}; with standard deviation of {disagreements.std()}")
+
+    np.save("disagreements.npy", disagreements)
+
+    sns.kdeplot(data=disagreements)
+    plt.savefig("disagreements.png")
+
+
+if __name__ == "__main__":
+
+    logits = []
+    for i, arg in enumerate(sys.argv[1:]):
+        print(f"loading {arg}")
+        logits_ = np.loadtxt(arg)
+        logits.append(logits_)
+
+    logits = np.stack(logits, axis=1) # N, M, K
+    N, M, K = logits.shape
+
+    lakshminarayanan_uncertainty(logits)
+    #ml_dirichlet_based_uncertainty(logits)
+        
 
 
