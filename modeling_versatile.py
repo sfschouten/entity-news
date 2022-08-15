@@ -13,7 +13,7 @@ def _versatile_dropout(config_dict, key):
     if f'{key}_dropout' in config_dict:
         dropout = config_dict[f'{key}_dropout']
     else:
-        print("Dropout for SequenceClassificationHead not specified...")
+        print(f"Dropout for '{key}' not specified...")
         for key in config_dict.keys():
             if 'dropout' in key:
                 dropout = config_dict[key]
