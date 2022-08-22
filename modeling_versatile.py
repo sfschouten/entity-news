@@ -5,8 +5,9 @@ import torch.nn as nn
 from torch import FloatTensor
 from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
 from transformers import PreTrainedModel, PretrainedConfig
+from transformers.activations import get_activation
 from transformers.file_utils import ModelOutput
-from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput
+from transformers.modeling_outputs import TokenClassifierOutput, SequenceClassifierOutput, MaskedLMOutput
 
 
 def _versatile_dropout(config_dict, key):
@@ -34,7 +35,9 @@ class Head(nn.Module):
         self.task_key, self.head_idx = key.split('-')
 
     def extract_kwargs(self, kwargs):
-        raise NotImplementedError
+        labels = kwargs.pop(f'{self.task_key}_labels', None)
+        return_dict = kwargs.get('return_dict', None)
+        return labels, return_dict
 
     def forward(self, base_outputs, *args):
         raise NotImplementedError
@@ -51,11 +54,6 @@ class TokenClassification(Head):
 
         self.dropout = nn.Dropout(_versatile_dropout(config_dict, key))
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
-
-    def extract_kwargs(self, kwargs):
-        labels = kwargs.pop(f'{self.task_key}_labels', None)
-        return_dict = kwargs.get('return_dict', None)
-        return labels, return_dict
 
     def forward(self, base_outputs, *args):
         labels, return_dict = args
@@ -95,21 +93,16 @@ class SequenceClassification(Head):
         self.pre_classifier = nn.Linear(config.hidden_size, config.hidden_size)
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
 
-    def extract_kwargs(self, kwargs):
-        labels = kwargs.pop(f'{self.task_key}_labels', None)
-        return_dict = kwargs.get('return_dict', None)
-        return labels, return_dict
-
     def forward(self, base_outputs, *args):
         labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        hidden_state = base_outputs['hidden_states'][self.attach_layer]       # (bs, seq_len, dim)
-        pooled_output = hidden_state[:, 0]                      # (bs, dim)
-        pooled_output = self.pre_classifier(pooled_output)      # (bs, dim)
-        pooled_output = nn.ReLU()(pooled_output)                # (bs, dim)
-        pooled_output = self.dropout(pooled_output)             # (bs, dim)
-        logits = self.classifier(pooled_output)                 # (bs, num_labels)
+        hidden_state = base_outputs['hidden_states'][self.attach_layer]  # (bs, seq_len, dim)
+        pooled_output = hidden_state[:, 0]  # (bs, dim)
+        pooled_output = self.pre_classifier(pooled_output)  # (bs, dim)
+        pooled_output = nn.ReLU()(pooled_output)  # (bs, dim)
+        pooled_output = self.dropout(pooled_output)  # (bs, dim)
+        logits = self.classifier(pooled_output)  # (bs, num_labels)
 
         loss = None
         if labels is not None:
@@ -147,6 +140,40 @@ class SequenceClassification(Head):
         )
 
 
+class MaskedLM(Head):
+
+    def __init__(self, key, config: PretrainedConfig):
+        super().__init__(key, config)
+
+        self.activation = get_activation(config.activation)
+
+        self.vocab_transform = nn.Linear(config.dim, config.dim)
+        self.vocab_layer_norm = nn.LayerNorm(config.dim, eps=1e-12)
+        self.vocab_projector = nn.Linear(config.dim, config.vocab_size)
+
+        self.mlm_loss_fct = nn.CrossEntropyLoss()
+
+    def forward(self, base_outputs, *args):
+        labels, return_dict = args
+
+        hidden_states = base_outputs[0]  # (bs, seq_length, dim)
+        prediction_logits = self.vocab_transform(hidden_states)  # (bs, seq_length, dim)
+        prediction_logits = self.activation(prediction_logits)  # (bs, seq_length, dim)
+        prediction_logits = self.vocab_layer_norm(prediction_logits)  # (bs, seq_length, dim)
+        prediction_logits = self.vocab_projector(prediction_logits)  # (bs, seq_length, vocab_size)
+
+        mlm_loss = None
+        if labels is not None:
+            mlm_loss = self.mlm_loss_fct(prediction_logits.view(-1, prediction_logits.size(-1)), labels.view(-1))
+
+        return MaskedLMOutput(
+            loss=mlm_loss,
+            logits=prediction_logits,
+            hidden_states=base_outputs.hidden_states,
+            attentions=base_outputs.attentions
+        )
+
+
 class VersatileOutput(ModelOutput):
     loss: Optional[FloatTensor] = None
 
@@ -155,7 +182,6 @@ T = TypeVar('T', bound=PreTrainedModel)
 
 
 def create_versatile_class(model_cls: Type[T]):
-
     class VersatileModelForAnyTasks(model_cls):
 
         def __init__(self, config: PretrainedConfig,

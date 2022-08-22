@@ -2,103 +2,41 @@ import argparse
 import pprint
 from functools import partial
 
-import numpy as np
-from datasets import load_dataset, load_metric
+from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, \
-    Trainer, EarlyStoppingCallback, DataCollatorWithPadding
+    Trainer, EarlyStoppingCallback
 
-import dataset_mwep
-from modeling_versatile import SequenceClassification
+from data_collator import DataCollatorForLanguageModeling
+from modeling_versatile import MaskedLM
+from train_news_clf import news_clf_dataset
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
-
-from sklearn import metrics
 
 import wandb
 
 
-def news_clf_dataset(config, tokenizer, **kwargs):
-    # dataset processing/loading
-    dataset = load_dataset(
-        dataset_mwep.__file__,
-        data_dir=config['nc_data_folder'],
-        mwep_path=config['mwep_home'],
-        **kwargs
-    )
-
-    dataset = dataset.flatten().remove_columns(
-        [
-            'uri',
-            'incident.extra_info.sem:hasPlace',
-            'incident.extra_info.sem:hasTimeStamp',
-            'incident.wdt_id'
-        ]
-    ).rename_column('incident.incident_type', 'labels')
-
-    if tokenizer.name_or_path in tokenizer.max_model_input_sizes:
-        max_length = tokenizer.max_model_input_sizes[tokenizer.name_or_path]
-    else:
-        max_length = 512
-        print("No max length can be inferred, falling back to 512")
-
-    # tokenize
-    tokenized_dataset = dataset.map(
-        lambda examples: tokenizer(
-            examples['content'], padding=False, truncation=True, max_length=max_length),
-        batched=True
-    ).remove_columns(['content'])
-
-    return tokenized_dataset
+def news_data(config, tokenizer):
+    dataset = news_clf_dataset(config, tokenizer)
+    dataset.remove_columns(['labels'])
+    return dataset
 
 
-def compute_news_clf_metrics(cli_config, acc_metric, class_names, eval_pred):
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-
-    # store predictions to text file for later analysis
-    np.savetxt(cli_config['run_path'] + '/logits.txt', logits)
-
-    print(metrics.classification_report(labels, preds, target_names=class_names))
-    clf_report_dct = metrics.classification_report(
-        labels, preds,
-        target_names=class_names,
-        output_dict=True
-    )
-    clf_report = [
-        [key] + list(row.values())
-        for key, row in clf_report_dct.items()
-        if key != 'accuracy'
-    ] + [['accuracy', 0., 0., clf_report_dct['accuracy'], 0]]
-    wandb.log({"nc_clf_report": wandb.Table(
-        columns=['', 'precision', 'recall', 'f1-score', 'support'],
-        data=clf_report
-    )})
-
-    print(metrics.confusion_matrix(labels, preds))
-    wandb.log({"nc_conf_mat": wandb.plot.confusion_matrix(
-        y_true=labels, preds=preds, class_names=class_names)})
-
-    return acc_metric.compute(predictions=preds, references=labels)
+def compute_mlm_metrics(config, metric):
+    return {'': 0}
 
 
-def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
-    wandb.init(project='entity-news', tags=['NewsCLF'])
+def train_mlm(cli_config, dataset_fn=news_data):
+    wandb.init(project='entity-news', tags=['MLM'])
+
+    head_id = cli_config['head_id']
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    tokenized_dataset = dataset_fn(cli_config, tokenizer).rename_column('labels', 'nc_labels')
-    class_names = tokenized_dataset['train'].features['nc_labels'].names
+    tokenized_dataset = dataset_fn(cli_config, tokenizer)
 
     # load model
-    head_id = cli_config['head_id']
     heads = {
-        head_id: (1., SequenceClassification),
+        head_id: (1., MaskedLM),
     }
-    model = create_or_load_versatile_model(
-        cli_config,
-        {
-            f'{head_id}_num_labels': len(class_names),
-        },
-        heads
-    )
+    model = create_or_load_versatile_model(cli_config, {}, heads)
 
     # training
     training_args = TrainingArguments(
@@ -111,26 +49,27 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
         load_best_model_at_end=True,
         metric_for_best_model=cli_config['eval_metric'],
         remove_unused_columns=False,
-        label_names=['nc_labels'],
+        label_names=['mlm_labels'],
         evaluation_strategy=cli_config['eval_strategy'],
         save_strategy=cli_config['eval_strategy'],
         eval_steps=cli_config['eval_frequency'],
         warmup_steps=cli_config['warmup_steps'],
         report_to=cli_config['report_to'],
         save_total_limit=5,
+        prediction_loss_only=True,
     )
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset['train'],
-        eval_dataset=tokenized_dataset['validation'],
-        compute_metrics=partial(
-            compute_news_clf_metrics, cli_config, load_metric('accuracy'), class_names),
+        train_dataset=tokenized_dataset['train'].with_format('torch'),
+        eval_dataset=tokenized_dataset['validation'].with_format('torch'),
+        compute_metrics=partial(compute_mlm_metrics, cli_config, load_metric('accuracy')),
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],
-        data_collator=DataCollatorWithPadding(
+        data_collator=DataCollatorForLanguageModeling(
             tokenizer=tokenizer,
+            label_name='mlm_labels'
         ),
     )
 
@@ -163,7 +102,7 @@ def train_news_clf_argparse(parser: argparse.ArgumentParser):
 
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
-    parser.add_argument('--head_id', default='nc-0', type=str)
+    parser.add_argument('--head_id', default='mlm-0', type=str)
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
@@ -190,4 +129,4 @@ if __name__ == "__main__":
     parser = train_news_clf_argparse(parser)
     args = parser.parse_args()
 
-    train_news_clf(create_run_folder_and_config_dict(args), news_clf_dataset)
+    train_mlm(create_run_folder_and_config_dict(args))

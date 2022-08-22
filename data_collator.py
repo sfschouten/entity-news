@@ -1,9 +1,25 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 
+import transformers
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import DataCollatorMixin
 from transformers.file_utils import PaddingStrategy
+
+
+@dataclass
+class DataCollatorForLanguageModeling(transformers.DataCollatorForLanguageModeling):
+    """
+    Custom override that renames 'labels' to configurable other name.
+    """
+
+    label_name: str = "labels"
+
+    def __call__(self, features, return_tensors=None):
+        result = super().__call__(features, return_tensors)
+        result[self.label_name] = result['labels']
+        del result['labels']
+        return result
 
 
 @dataclass
