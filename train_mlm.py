@@ -1,10 +1,11 @@
 import argparse
 import pprint
+from collections import OrderedDict
 from functools import partial
 
 from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, \
-    Trainer, EarlyStoppingCallback
+    Trainer, EarlyStoppingCallback, AutoModelForMaskedLM
 
 from data_collator import DataCollatorForLanguageModeling
 from modeling_versatile import MaskedLM
@@ -73,6 +74,14 @@ def train_mlm(cli_config, dataset_fn=news_data):
         ),
     )
 
+    if cli_config['use_pretrained_mlm_weights']:
+        mlm_model = AutoModelForMaskedLM.from_pretrained(cli_config['model'])
+        if cli_config['model'].startswith('distilbert-base'):
+            relevant_weights = OrderedDict((k, v) for k, v in mlm_model.state_dict().items() if k.startswith('vocab'))
+            model.heads[head_id].load_state_dict(relevant_weights)
+        else:
+            raise ValueError(f"{cli_config['model']} not yet supported.")
+
     if cli_config['probing']:
         for param in model.base_model.parameters():
             param.requires_grad = False
@@ -103,6 +112,7 @@ def train_news_clf_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
     parser.add_argument('--head_id', default='mlm-0', type=str)
+    parser.add_argument('--use_pretrained_mlm_weights', action='store_true')
 
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
@@ -110,7 +120,7 @@ def train_news_clf_argparse(parser: argparse.ArgumentParser):
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
-    parser.add_argument('--eval_metric', default='accuracy', type=str)
+    parser.add_argument('--eval_metric', default='loss', type=str)
     parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
