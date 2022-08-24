@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import os
 import json
@@ -33,9 +34,12 @@ def create_or_load_versatile_model(cli_config, config_additions, heads):
         config = AutoConfig.from_pretrained(cli_config['checkpoint'])
         config.update(config_additions)
         model = cls.from_pretrained(cli_config['checkpoint'], heads.items(), config=config)
-    else:
+    elif cli_config['no_pretrained']:
         base_config.update(config_additions)
         model = cls(base_config, heads.items())
+    else:
+        base_config.update(config_additions)
+        model = cls.from_pretrained(cli_config['model'], heads.items(), config=base_config)
 
     return model
 
@@ -51,3 +55,19 @@ def train_versatile(cli_config, trainer, eval_ignore=()):
 
     if not cli_config['eval_only']:
         trainer.train(**train_kwargs)
+
+
+def base_train_argparse(parser: argparse.ArgumentParser):
+    parser.add_argument('--report_to', default=None, type=str)
+
+    parser.add_argument('--runs_folder', default='runs')
+    parser.add_argument('--run_name', default=None)
+
+    parser.add_argument('--model', default="distilbert-base-cased")
+
+    parser.add_argument('--checkpoint', default=None)
+    parser.add_argument('--continue', action='store_true')
+    parser.add_argument('--no_pretrained', action='store_true')
+    parser.add_argument('--eval_only', action='store_true')
+
+    return parser

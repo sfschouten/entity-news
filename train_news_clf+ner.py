@@ -5,6 +5,7 @@ from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, EarlyStoppingCallback, \
     DataCollatorWithPadding
 
+import utils
 from data_collator import DataCollatorForTokenClassification
 
 from modeling_versatile import SequenceClassification, TokenClassification
@@ -130,23 +131,14 @@ def train_news_clf(cli_config):
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
-
-    parser.add_argument('--report_to', default=None, type=str)
+    parser = utils.base_train_argparse(parser)
 
     parser.add_argument('--nc_data_folder', default="../data/minimal")
     parser.add_argument('--mwep_home', default='../mwep')
 
-    parser.add_argument('--runs_folder', default='runs')
-    parser.add_argument('--run_name', default=None)
-
-    parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--ner_attach_layer', default=2, type=int)
     parser.add_argument('--ner_head_id', default='ner-0', type=str)
     parser.add_argument('--nc_head_id', default='nc-0', type=str)
-
-    parser.add_argument('--checkpoint', default=None)
-    parser.add_argument('--continue', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--ner_dataset', choices=['kilt', 'conll'], default='kilt')
     parser.add_argument('--ner_dataset_size', default=None, type=int)

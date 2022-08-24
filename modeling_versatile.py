@@ -184,8 +184,7 @@ T = TypeVar('T', bound=PreTrainedModel)
 def create_versatile_class(model_cls: Type[T]):
     class VersatileModelForAnyTasks(model_cls):
 
-        def __init__(self, config: PretrainedConfig,
-                     heads: List[Tuple[str, float, Type[Head]]]):
+        def __init__(self, config: PretrainedConfig, heads: List[Tuple[str, float, Type[Head]]]):
             super().__init__(config)
 
             setattr(self, model_cls.base_model_prefix, model_cls(config))

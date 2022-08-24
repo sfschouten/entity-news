@@ -7,6 +7,7 @@ from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, \
     Trainer, EarlyStoppingCallback, AutoModelForMaskedLM
 
+import utils
 from data_collator import DataCollatorForLanguageModeling
 from modeling_versatile import MaskedLM
 from train_news_clf import news_clf_dataset
@@ -75,9 +76,11 @@ def train_mlm(cli_config, dataset_fn=news_data):
     )
 
     if cli_config['use_pretrained_mlm_weights']:
+        print('Using weights from pretrained MLM model.')
         mlm_model = AutoModelForMaskedLM.from_pretrained(cli_config['model'])
         if cli_config['model'].startswith('distilbert-base'):
             relevant_weights = OrderedDict((k, v) for k, v in mlm_model.state_dict().items() if k.startswith('vocab'))
+            print(f'Copying the following entries: {relevant_weights.keys()}')
             model.heads[head_id].load_state_dict(relevant_weights)
         else:
             raise ValueError(f"{cli_config['model']} not yet supported.")
@@ -100,23 +103,15 @@ def train_mlm(cli_config, dataset_fn=news_data):
     pprint.pprint(result)
 
 
-def train_news_clf_argparse(parser: argparse.ArgumentParser):
-    parser.add_argument('--report_to', default=None, type=str)
+def train_mlm_argparse(parser: argparse.ArgumentParser):
+    parser = utils.base_train_argparse(parser)
 
     parser.add_argument('--nc_data_folder', default="../data/minimal")
-
     parser.add_argument('--mwep_home', default='../mwep')
-    parser.add_argument('--runs_folder', default='runs')
-    parser.add_argument('--run_name', default=None)
 
-    parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
     parser.add_argument('--head_id', default='mlm-0', type=str)
     parser.add_argument('--use_pretrained_mlm_weights', action='store_true')
-
-    parser.add_argument('--checkpoint', default=None)
-    parser.add_argument('--continue', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
@@ -136,7 +131,7 @@ def train_news_clf_argparse(parser: argparse.ArgumentParser):
 if __name__ == "__main__":
     # parse cmdline arguments
     parser = argparse.ArgumentParser()
-    parser = train_news_clf_argparse(parser)
+    parser = train_mlm_argparse(parser)
     args = parser.parse_args()
 
     train_mlm(create_run_folder_and_config_dict(args))

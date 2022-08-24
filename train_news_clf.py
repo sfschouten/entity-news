@@ -8,6 +8,7 @@ from transformers import AutoTokenizer, TrainingArguments, \
     Trainer, EarlyStoppingCallback, DataCollatorWithPadding
 
 import dataset_mwep
+import utils
 from modeling_versatile import SequenceClassification
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
@@ -153,21 +154,13 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
 
 
 def train_news_clf_argparse(parser: argparse.ArgumentParser):
-    parser.add_argument('--report_to', default=None, type=str)
+    parser = utils.base_train_argparse(parser)
 
     parser.add_argument('--nc_data_folder', default="../data/minimal")
-
     parser.add_argument('--mwep_home', default='../mwep')
-    parser.add_argument('--runs_folder', default='runs')
-    parser.add_argument('--run_name', default=None)
 
-    parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
     parser.add_argument('--head_id', default='nc-0', type=str)
-
-    parser.add_argument('--checkpoint', default=None)
-    parser.add_argument('--continue', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)

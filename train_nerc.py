@@ -2,6 +2,8 @@ import argparse
 from functools import partial
 
 import numpy as np
+
+import utils
 import wandb
 
 from datasets import load_dataset, load_metric
@@ -144,19 +146,11 @@ def train_entity_recognition(cli_config, dataset_fns):
 
 
 def train_nerc_argparse(parser: argparse.ArgumentParser):
-    parser.add_argument('--report_to', default=None, type=str)
+    parser = utils.base_train_argparse(parser)
 
-    parser.add_argument('--runs_folder', default='runs')
-    parser.add_argument('--run_name', default=None)
-
-    parser.add_argument('--model', default="distilbert-base-cased")
     parser.add_argument('--probing', action='store_true')
-    parser.add_argument('--head_attach_layer', default=-1, type=int)
     parser.add_argument('--head_id', default='nerc-0', type=str)
-
-    parser.add_argument('--checkpoint', default=None)
-    parser.add_argument('--continue', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
+    parser.add_argument('--head_attach_layer', default=-1, type=int)
 
     # dataset
     parser.add_argument('--train_dataset', choices=['conll'], default='conll')
