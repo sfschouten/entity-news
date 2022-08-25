@@ -11,6 +11,9 @@ from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from utils import create_run_folder_and_config_dict
 from utils_mentions import Mention, samples_to_mentions, mentions_by_sample
 
+VERSIONS = ['mask', 'substitute']
+SUB_VARIANTS = ['random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift']
+
 
 def entity_poor_news_clf_dataset(cli_config, tokenizer):
     dataset = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
@@ -167,17 +170,11 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     return dataset
 
 
-if __name__ == "__main__":
-    # parse cmdline arguments
-    parser = argparse.ArgumentParser()
-    parser = train_news_clf_argparse(parser)
-
-    versions = ['mask', 'substitute']
-    parser.add_argument('--experiment_version', choices=versions)
+def entitypoor_argparse(parser: argparse.ArgumentParser):
+    parser.add_argument('--experiment_version', choices=VERSIONS)
 
     # if experiment_version = substitute
-    sub_variants = ['random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift']
-    parser.add_argument('--substitute_variant', choices=sub_variants)
+    parser.add_argument('--substitute_variant', choices=SUB_VARIANTS)
 
     # if substitute_variant = frequency
     parser.add_argument('--nr_most_frequent', default=100, type=int)
@@ -185,11 +182,19 @@ if __name__ == "__main__":
     # special option to run all experiment variants
     parser.add_argument('--run_all_variants', action='store_true')
 
+    return parser
+
+
+if __name__ == "__main__":
+    # parse cmdline arguments
+    parser = argparse.ArgumentParser()
+    parser = train_news_clf_argparse(parser)
+    parser = entitypoor_argparse(parser)
     args = parser.parse_args()
 
     if args.run_all_variants:
         all_variants = [
-            {'experiment_version': 'substitute', 'substitute_variant': x} for x in sub_variants
+            {'experiment_version': 'substitute', 'substitute_variant': x} for x in SUB_VARIANTS
         ] + [{'experiment_version': 'mask'}]
 
         for dict in all_variants:

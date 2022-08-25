@@ -31,13 +31,16 @@ def create_or_load_versatile_model(cli_config, config_additions, heads):
     cls = create_versatile_class(base_model_cls)
 
     if cli_config['checkpoint'] is not None:
+        print(f"Loading checkpoint {cli_config['checkpoint']} for base of versatile model.")
         config = AutoConfig.from_pretrained(cli_config['checkpoint'])
         config.update(config_additions)
         model = cls.from_pretrained(cli_config['checkpoint'], heads.items(), config=config)
     elif cli_config['no_pretrained']:
+        print(f"Randomly initializing the base of the versatile model.")
         base_config.update(config_additions)
         model = cls(base_config, heads.items())
     else:
+        print(f"Using pretrained weights for the base of the versatile model.")
         base_config.update(config_additions)
         model = cls.from_pretrained(cli_config['model'], heads.items(), config=base_config)
 
