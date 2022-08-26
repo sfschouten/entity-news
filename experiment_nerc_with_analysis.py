@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from train_nerc import train_nerc_argparse, train_entity_recognition, conll2003_dataset
 from utils import create_run_folder_and_config_dict
-from utils_mentions import samples_to_mentions, mentions_by_sample, mention_topic_dist
+from utils_mentions import samples_to_mentions, mentions_by_sample, calc_mention_topic_dist
 
 TAGS = ['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC']
 TAG2IDX = {tag: idx for idx, tag in enumerate(TAGS)}
@@ -62,7 +62,7 @@ def train_nerc_and_analyze(cli_config):
         entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(samples['input_ids']))
 
         topics = samples['labels']
-        topic_dists = mention_topic_dist(entity_mentions, topics, nr_topics)
+        topic_dists = calc_mention_topic_dist(entity_mentions, topics, nr_topics)
 
         for mentions, logits in zip(entity_mentions_by_sample, eval_logits):
             for mention in mentions:
