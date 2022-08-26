@@ -1,15 +1,22 @@
 import argparse
+import math
 from collections import Counter
 import random
 
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import DataLoader
+
 import wandb
 from scipy.spatial.distance import jensenshannon
+from scipy.special import rel_entr
 from tqdm import tqdm
 
 from train_news_clf import train_news_clf, train_news_clf_argparse
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
 from utils import create_run_folder_and_config_dict
-from utils_mentions import Mention, samples_to_mentions, mentions_by_sample
+from utils_mentions import Mention, samples_to_mentions, mentions_by_sample, calc_mention_topic_dist
 
 VERSIONS = ['mask', 'substitute']
 SUB_VARIANTS = ['random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift']
@@ -34,6 +41,11 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     def substitute_entities(samples):
         nonlocal tokenizer
         entity_mentions = samples_to_mentions(samples)
+        entity_mention_counter = Counter(entity_mentions)
+
+        # calculate distribution over topics
+        topics = samples['labels']
+        mention_topic_dist = calc_mention_topic_dist(entity_mentions, topics, nr_topics)
 
         if cli_config['substitute_variant'] == 'random_tokens':
             vocab = list(tokenizer.vocab.values())
@@ -41,13 +53,21 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
 
             def sample_fn(mention: Mention):
                 entity = random.sample(unique, 1)[0]
-                return random.sample(vocab, len(entity.token_ids))
+                return random.sample(vocab, len(entity.token_ids)),
         elif cli_config['substitute_variant'] == 'random_mention':
             unique = list(set(entity_mentions))
 
-            def sample_fn(_):
-                entity = random.sample(unique, 1)[0]
-                return entity.token_ids
+            def sample_fn(mention: Mention):
+                substitute = random.sample(unique, 1)[0]
+                original_freq = entity_mention_counter[mention]
+                substitute_freq = entity_mention_counter[substitute]
+                original_dist = mention_topic_dist[mention]
+                substitute_dist = mention_topic_dist[substitute]
+                topic_shift = sum(rel_entr(original_dist, substitute_dist))
+                return substitute.token_ids, {
+                    'frequencies': (original_freq, substitute_freq),
+                    'topic_shift': topic_shift
+                }
         elif cli_config['substitute_variant'] == 'type_invariant':
             by_type = {}
             for mention in entity_mentions:
@@ -58,10 +78,10 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
             def sample_fn(mention):
                 same_type = by_type[mention.type]
                 entity = random.sample(same_type, 1)[0]
-                return entity.token_ids
+                return entity.token_ids,
         elif cli_config['substitute_variant'] == 'frequency':
             nr_most_frequent = cli_config['nr_most_frequent']
-            most_frequent = Counter(entity_mentions).most_common(nr_most_frequent)
+            most_frequent = entity_mention_counter.most_common(nr_most_frequent)
 
             # print most frequent
             print(sorted([
@@ -71,15 +91,10 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
 
             def sample_fn(_):
                 entity, _ = random.sample(most_frequent, 1)[0]
-                return entity.token_ids
+                return entity.token_ids,
         elif cli_config['substitute_variant'] == 'topic_shift':
 
-            # TODO re-enable with more efficient version
             return {}
-
-            # calculate distribution over topics
-            topics = samples['labels']
-            mention_topic_dist = mention_topic_dist(entity_mentions, topics, nr_topics)
 
             # we are looking for mentions that occur in very particular topics
             # ...
@@ -115,18 +130,20 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                 highest_shift = sorted(mention_kls[mention].items(), key=lambda x: x[1])[
                                 :-50]  # TODO make configurable
                 entity, _ = random.sample(highest_shift, 1)[0]
-                return entity.token_ids
+                return entity.token_ids,
         else:
             def sample_fn(_):
                 raise NotImplementedError()
 
         input_ids = samples['input_ids']
+        metadata = {}
         entity_mentions_by_sample = mentions_by_sample(entity_mentions, len(input_ids))
 
         # make the substitutions
         for i, sample_mentions in enumerate(entity_mentions_by_sample):
             # create mapping from entities to substitutes
-            substitute_tokens = {mention: sample_fn(mention) for mention in set(sample_mentions)}
+            substitutes = {mention: sample_fn(mention) for mention in set(sample_mentions)}
+            sample_metadata = {}
 
             # go through mentions in this sample in reverse order
             for mention in sorted(sample_mentions, key=lambda m: m.token_idxs[0], reverse=True):
@@ -142,9 +159,22 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
                     del input_ids[mention.sample_index][idx]
 
                 # insert substitute
-                for t in reversed(substitute_tokens[mention]):
+                for t in reversed(substitutes[mention][0]):
                     input_ids[mention.sample_index].insert(start_idx, t)
                     # print(f"inserting {subst_token} at {mention.sample_index}:{start_idx}")
+
+                if len(substitutes[mention]) > 1:
+                    _metadata = substitutes[mention][1]
+                    for key, value in _metadata.items():
+                        values = sample_metadata.get(key, [])
+                        values.append(value)
+                        sample_metadata[key] = values
+
+            for key, value in sample_metadata.items():
+                values = metadata.get(key, [[]]*len(entity_mentions_by_sample))
+                values[i] = value
+                metadata[key] = values
+
                 # print('----------')
             # print(f'===={i}=====')
 
@@ -156,7 +186,7 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
         # create new attention mask
         mask = [[1] * len(s_input_ids) for i, s_input_ids in enumerate(input_ids)]
 
-        return {'input_ids': input_ids, 'attention_mask': mask}
+        return {'input_ids': input_ids, 'attention_mask': mask} | metadata
 
     if cli_config['experiment_version'] == 'mask':
         fn = mask_entities
@@ -166,8 +196,53 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
         raise ValueError(f"Invalid version of experiment: {cli_config['experiment_version']}")
 
     dataset = dataset.map(fn, batched=True, batch_size=None).remove_columns(
-        ['ner', 'incident.wdt_id'])
+        ['ner', 'incident.wdt_id']
+    )
     return dataset
+
+
+def output(df):
+    if 'topic_shift' in df.columns:
+        # calculate average topic_shift per sample
+        df['topic_shift_avg'] = df['topic_shift'].apply(np.mean)
+        df = df.drop(columns=['topic_shift'])
+
+        print(df['metric'].corr(df['topic_shift_avg']))
+
+    if 'frequencies' in df.columns:
+        # calculate average difference in log-frequency
+        df['log_frequency_shift'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: math.log(freqs[0]) + math.log(freqs[1]), sample))
+        )
+        df['log_frequency_shift_avg'] = df['log_frequency_shift'].apply(np.mean)
+        df = df.drop(columns=['frequencies', 'log_frequency_shift'])
+
+        print(df['metric'].corr(df['log_frequency_shift_avg']))
+
+
+def analysis(cli_config, model, eval_dataset):
+    # convert dataset to pandas dataframe
+    df = pd.DataFrame(eval_dataset)
+    print(df.columns)
+
+    eval_dataloader = DataLoader(eval_dataset, batch_size=cli_config['batch_size_eval'])
+    correctness = []
+
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model.eval()
+    for batch in eval_dataloader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = model(**batch)
+
+        logits = outputs.logits
+        predictions = torch.argmax(logits, dim=-1)
+        correct = predictions == batch['labels']
+        correctness.extend(list(correct))
+
+    df['metric'] = correctness
+
+    output(df)
 
 
 def entitypoor_argparse(parser: argparse.ArgumentParser):
@@ -181,6 +256,8 @@ def entitypoor_argparse(parser: argparse.ArgumentParser):
 
     # special option to run all experiment variants
     parser.add_argument('--run_all_variants', action='store_true')
+
+    parser.add_argument('--do_analysis', action='store_true')
 
     return parser
 
@@ -206,4 +283,7 @@ if __name__ == "__main__":
             run.finish()
     else:
         config = create_run_folder_and_config_dict(args)
-        train_news_clf(config, entity_poor_news_clf_dataset)
+        result, model, eval_dataset = train_news_clf(config, entity_poor_news_clf_dataset)
+
+        if config['do_analysis']:
+            analysis(model, eval_dataset)

@@ -85,8 +85,12 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
     wandb.init(project='entity-news', tags=['NewsCLF'])
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    tokenized_dataset = dataset_fn(cli_config, tokenizer).rename_column('labels', 'nc_labels')
-    class_names = tokenized_dataset['train'].features['nc_labels'].names
+    tokenized_dataset = dataset_fn(cli_config, tokenizer)
+
+    train_dataset = tokenized_dataset.remove_columns(
+        [c for c in tokenized_dataset['train'].column_names if c not in ['labels', 'input_ids', 'attention_mask']]
+    ).rename_column('labels', 'nc_labels')
+    class_names = train_dataset['train'].features['nc_labels'].names
 
     # load model
     head_id = cli_config['head_id']
@@ -123,8 +127,8 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset['train'],
-        eval_dataset=tokenized_dataset['validation'],
+        train_dataset=train_dataset['train'],
+        eval_dataset=train_dataset['validation'],
         compute_metrics=partial(
             compute_news_clf_metrics, cli_config, load_metric('accuracy'), class_names),
         callbacks=[
@@ -146,11 +150,12 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
 
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     result = trainer.evaluate(
-        tokenized_dataset[key],
+        train_dataset[key],
         metric_key_prefix=key,
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)
+    return result, model, tokenized_dataset[key]
 
 
 def train_news_clf_argparse(parser: argparse.ArgumentParser):

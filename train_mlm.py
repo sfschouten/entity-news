@@ -16,23 +16,17 @@ from utils import create_run_folder_and_config_dict, create_or_load_versatile_mo
 import wandb
 
 
-def news_data(config, tokenizer):
-    dataset = news_clf_dataset(config, tokenizer)
-    dataset.remove_columns(['labels'])
-    return dataset
 
-
-def compute_mlm_metrics(config, metric):
-    return {'': 0}
-
-
-def train_mlm(cli_config, dataset_fn=news_data):
+def train_mlm(cli_config, dataset_fn=news_clf_dataset):
     wandb.init(project='entity-news', tags=['MLM'])
 
     head_id = cli_config['head_id']
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
     tokenized_dataset = dataset_fn(cli_config, tokenizer)
+    train_dataset = tokenized_dataset.remove_columns(
+        [c for c in tokenized_dataset['train'].column_names if c not in ['input_ids', 'attention_mask']]
+    )
 
     # load model
     heads = {
@@ -63,9 +57,8 @@ def train_mlm(cli_config, dataset_fn=news_data):
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset['train'].with_format('torch'),
-        eval_dataset=tokenized_dataset['validation'].with_format('torch'),
-        compute_metrics=partial(compute_mlm_metrics, cli_config, load_metric('accuracy')),
+        train_dataset=train_dataset['train'].with_format('torch'),
+        eval_dataset=train_dataset['validation'].with_format('torch'),
         callbacks=[
             EarlyStoppingCallback(early_stopping_patience=cli_config['early_stopping_patience'])
         ],
@@ -96,11 +89,12 @@ def train_mlm(cli_config, dataset_fn=news_data):
 
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     result = trainer.evaluate(
-        tokenized_dataset[key],
+        train_dataset[key],
         metric_key_prefix=key,
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)
+    return result, model, tokenized_dataset[key]
 
 
 def train_mlm_argparse(parser: argparse.ArgumentParser):
