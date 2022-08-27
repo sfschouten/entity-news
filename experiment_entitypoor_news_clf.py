@@ -220,12 +220,20 @@ def output(df):
         print(df['metric'].corr(df['log_frequency_shift_avg']))
 
 
-def analysis(cli_config, model, eval_dataset):
+def analysis(cli_config, trainer, model, eval_dataset):
     # convert dataset to pandas dataframe
     df = pd.DataFrame(eval_dataset)
     print(df.columns)
 
-    eval_dataloader = DataLoader(eval_dataset, batch_size=cli_config['batch_size_eval'])
+    eval_dataset.set_format("torch")
+    eval_dataset = eval_dataset.remove_columns(
+        [c for c in eval_dataset.column_names if c not in ['nc_labels', 'input_ids', 'attention_mask']]
+    )
+    eval_dataloader = DataLoader(
+        eval_dataset,
+        batch_size=cli_config['batch_size_eval'],
+        collate_fn=trainer.data_collator
+    )
     correctness = []
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -283,7 +291,7 @@ if __name__ == "__main__":
             run.finish()
     else:
         config = create_run_folder_and_config_dict(args)
-        result, model, eval_dataset = train_news_clf(config, entity_poor_news_clf_dataset)
+        result, trainer, model, eval_dataset = train_news_clf(config, entity_poor_news_clf_dataset)
 
         if config['do_analysis']:
-            analysis(model, eval_dataset)
+            analysis(config, trainer, model, eval_dataset)

@@ -94,7 +94,7 @@ def train_mlm(cli_config, dataset_fn=news_clf_dataset):
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)
-    return result, model, tokenized_dataset[key]
+    return result, trainer, model, tokenized_dataset[key]
 
 
 def train_mlm_argparse(parser: argparse.ArgumentParser):

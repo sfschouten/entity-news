@@ -19,13 +19,19 @@ def entity_poor_news_data(config, tokenizer):
     return dataset
 
 
-
-def analysis(cli_config, model, eval_dataset):
+def analysis(cli_config, trainer, model, eval_dataset):
     # convert dataset to pandas dataframe
     df = pd.DataFrame(eval_dataset)
     print(df.columns)
 
-    eval_dataloader = DataLoader(eval_dataset, batch_size=cli_config['batch_size_eval'])
+    eval_dataset = eval_dataset.remove_columns(
+        [c for c in eval_dataset.column_names if c not in ['input_ids', 'attention_mask']]
+    )
+    eval_dataloader = DataLoader(
+        eval_dataset,
+        batch_size=cli_config['batch_size_eval'],
+        collate_fn=trainer.data_collator
+    )
     losses = []
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -41,7 +47,6 @@ def analysis(cli_config, model, eval_dataset):
     df['metric'] = losses
 
     output(df)
-
 
 
 if __name__ == "__main__":
@@ -65,7 +70,7 @@ if __name__ == "__main__":
             run.finish()
     else:
         config = create_run_folder_and_config_dict(args)
-        result, model, eval_dataset = train_mlm(config, entity_poor_news_data)
+        result, trainer, model, eval_dataset = train_mlm(config, entity_poor_news_data)
 
         if config['do_analysis']:
-            analysis(model, eval_dataset)
+            analysis(config, trainer, model, eval_dataset)

@@ -85,11 +85,11 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
     wandb.init(project='entity-news', tags=['NewsCLF'])
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
-    tokenized_dataset = dataset_fn(cli_config, tokenizer)
+    tokenized_dataset = dataset_fn(cli_config, tokenizer).rename_column('labels', 'nc_labels')
 
     train_dataset = tokenized_dataset.remove_columns(
         [c for c in tokenized_dataset['train'].column_names if c not in ['labels', 'input_ids', 'attention_mask']]
-    ).rename_column('labels', 'nc_labels')
+    )
     class_names = train_dataset['train'].features['nc_labels'].names
 
     # load model
@@ -155,7 +155,7 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
         ignore_keys=hidden_state_keys,
     )
     pprint.pprint(result)
-    return result, model, tokenized_dataset[key]
+    return result, trainer, model, tokenized_dataset[key]
 
 
 def train_news_clf_argparse(parser: argparse.ArgumentParser):

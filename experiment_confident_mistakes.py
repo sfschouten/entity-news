@@ -14,14 +14,14 @@ def analyse(cli_config):
     # load dataset (valid/test split)
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
     dataset1 = news_clf_dataset_with_ots_ner(cli_config, tokenizer)
-    cli_config['experiment_version'] = 'substitute'
-    cli_config['substitute_variant'] = 'random_tokens'
-    dataset2 = entity_poor_news_clf_dataset(cli_config, tokenizer)
+    #cli_config['experiment_version'] = 'substitute'
+    #cli_config['substitute_variant'] = 'random_tokens'
+    #dataset2 = entity_poor_news_clf_dataset(cli_config, tokenizer)
 
-    labels1 = dataset1['validation']['labels']
-    labels2 = dataset2['validation']['labels']
-    print(labels1 == labels2)
-    print(sum(x==y for x,y in zip(labels1, labels2)))
+    #labels1 = dataset1['validation']['labels']
+    #labels2 = dataset2['validation']['labels']
+    #print(labels1 == labels2)
+    #print(sum(x==y for x,y in zip(labels1, labels2)))
 
     dataset = dataset1['test' if cli_config['eval_on_test'] else 'validation']
 
