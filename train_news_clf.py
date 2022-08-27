@@ -88,7 +88,7 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
     tokenized_dataset = dataset_fn(cli_config, tokenizer).rename_column('labels', 'nc_labels')
 
     train_dataset = tokenized_dataset.remove_columns(
-        [c for c in tokenized_dataset['train'].column_names if c not in ['labels', 'input_ids', 'attention_mask']]
+        [c for c in tokenized_dataset['train'].column_names if c not in ['nc_labels', 'input_ids', 'attention_mask']]
     )
     class_names = train_dataset['train'].features['nc_labels'].names
 
