@@ -8,6 +8,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
+from tqdm import tqdm
+
 import wandb
 from scipy.spatial.distance import jensenshannon
 from scipy.special import rel_entr
@@ -202,12 +204,21 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
 
 
 def output(df):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
     if 'topic_shift' in df.columns:
         # calculate average topic_shift per sample
         df['topic_shift_avg'] = df['topic_shift'].apply(np.mean)
         df = df.drop(columns=['topic_shift'])
 
         print(df['metric'].corr(df['topic_shift_avg']))
+        
+        f, ax = plt.subplots(figsize=(6.5, 6.5))
+        sns.despine(f, left=True, bottom=True)
+        sns.scatterplot(x='topic_shift_avg', y='metric', size=1, data=df, ax=ax, linewidth=0)
+        plt.savefig('topic_shift.png')
+
 
     if 'frequencies' in df.columns:
         # calculate average difference in log-frequency
@@ -220,10 +231,10 @@ def output(df):
         print(df['metric'].corr(df['log_frequency_shift_avg']))
 
 
+
 def analysis(cli_config, trainer, model, eval_dataset):
     # convert dataset to pandas dataframe
     df = pd.DataFrame(eval_dataset)
-    print(df.columns)
 
     eval_dataset.set_format("torch")
     eval_dataset = eval_dataset.remove_columns(
@@ -235,20 +246,28 @@ def analysis(cli_config, trainer, model, eval_dataset):
         collate_fn=trainer.data_collator
     )
     correctness = []
+    label_logits = []
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model.to(device)
+
     model.eval()
-    for batch in eval_dataloader:
+    for batch in tqdm(eval_dataloader):
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
 
-        logits = outputs.logits
-        predictions = torch.argmax(logits, dim=-1)
-        correct = predictions == batch['labels']
-        correctness.extend(list(correct))
+        logits = outputs['nc-0_logits']
 
-    df['metric'] = correctness
+        _label_logits = torch.gather(logits, -1, batch['nc_labels'].unsqueeze(-1))
+        label_logits.extend(_label_logits.squeeze().tolist())
+
+        predictions = torch.argmax(logits, dim=-1)
+        correct = predictions == batch['nc_labels']
+        correctness.extend(correct.tolist())
+
+    #df['metric'] = correctness
+    df['metric'] = label_logits
 
     output(df)
 
