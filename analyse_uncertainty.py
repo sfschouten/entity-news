@@ -36,6 +36,29 @@ def calc_entropy(alphas):
     return entropy.squeeze()
 
 
+def calc_kl_with_uniform(alphas):
+    """
+    Attempt at implementation of LDDP with uniform Dirichlet as invariant measure.
+    Equal to entropy + a constant making it positive (unlike differential entropy).
+    """
+    
+    N, K = alphas.shape
+
+    def kl_divergence_dirichlets(alphas, betas):
+        alpha_0 = alphas.sum(axis=-1, keepdims=True)
+        beta_0 = betas.sum(axis=-1, keepdims=True)
+
+        return gammaln(alpha_0)                                                                             \
+            - (gammaln(alphas) - gammaln(beta_0)).sum(axis=-1, keepdims=True)                               \
+            + gammaln(betas).sum(axis=-1, keepdims=True)                                                    \
+            + ( (alphas - betas) * (digamma(alphas) - digamma(alpha_0)) ).sum(axis=-1, keepdims=True)
+
+    # the parameters of the uniform Dirichlet
+    betas = np.full((1, K), 1)
+
+    return kl_divergence_dirichlets(alphas, betas).squeeze()    
+
+
 def ml_dirichlet_based_uncertainty(logits):
     """
     """
@@ -67,9 +90,11 @@ def ml_dirichlet_based_uncertainty(logits):
 
     variances = calc_variance(alphas)
     entropies = calc_entropy(alphas)
+    kl_uniform = calc_kl_with_uniform(alphas)
 
     print(f"Mean variance is {variances.mean()}; with standard deviation of {variances.std()} .")
     print(f"Mean entropy is {entropies.mean()}; with standard deviation of {entropies.std()} .")
+    print(f"Mean KL w/ uniform-dirichlet is {kl_uniform.mean()}; with standard deviation of {kl_uniform.std()} .")
 
     np.save("entropies.npy", entropies)
 
@@ -113,7 +138,7 @@ if __name__ == "__main__":
     N, M, K = logits.shape
 
     lakshminarayanan_uncertainty(logits)
-    #ml_dirichlet_based_uncertainty(logits)
+    ml_dirichlet_based_uncertainty(logits)
         
 
 
