@@ -147,14 +147,17 @@ def train_news_clf(cli_config, dataset_fn=news_clf_dataset):
     hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
-
+   
+    result = None
     key = 'test' if cli_config['eval_on_test'] else 'validation'
-    result = trainer.evaluate(
-        train_dataset[key],
-        metric_key_prefix=key,
-        ignore_keys=hidden_state_keys,
-    )
-    pprint.pprint(result)
+    if not cli_config['dont_eval']:
+        result = trainer.evaluate(
+            train_dataset[key],
+            metric_key_prefix=key,
+            ignore_keys=hidden_state_keys,
+        )
+        pprint.pprint(result)
+
     return result, trainer, model, tokenized_dataset[key]
 
 

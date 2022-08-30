@@ -56,7 +56,7 @@ def train_versatile(cli_config, trainer, eval_ignore=()):
             'resume_from_checkpoint': cli_config['checkpoint']
         })
 
-    if not cli_config['eval_only']:
+    if not cli_config['dont_train']:
         trainer.train(**train_kwargs)
 
 
@@ -71,6 +71,7 @@ def base_train_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--checkpoint', default=None)
     parser.add_argument('--continue', action='store_true')
     parser.add_argument('--no_pretrained', action='store_true')
-    parser.add_argument('--eval_only', action='store_true')
+    parser.add_argument('--dont_train', action='store_true')
+    parser.add_argument('--dont_eval', action='store_true')
 
     return parser
