@@ -1,7 +1,8 @@
 import argparse
 import math
-from collections import Counter
 import random
+import warnings
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from datasets.fingerprint import fingerprint_transform
 
 from train_news_clf import train_news_clf, train_news_clf_argparse
 from experiment_visualize_entity_tokens import news_clf_dataset_with_ots_ner
+from experiment_nerc_with_analysis import draw_histwithmean
 from utils import create_run_folder_and_config_dict
 from utils_mentions import Mention, samples_to_mentions, mentions_by_sample, calc_mention_topic_dist
 
@@ -76,8 +78,18 @@ def substitute_entities(samples, nr_most_frequent=100, variant="random-mention",
 
         def sample_fn(mention):
             same_type = by_type[mention.type]
-            entity = random.sample(same_type, 1)[0]
-            return entity.token_ids,
+            substitute = random.sample(same_type, 1)[0]
+            
+            original_freq = entity_mention_counter[mention]
+            substitute_freq = entity_mention_counter[substitute]
+            original_dist = mention_topic_dist[mention]
+            substitute_dist = mention_topic_dist[substitute]
+            topic_shift = sum(rel_entr(original_dist, substitute_dist))
+
+            return substitute.token_ids, {
+                'frequencies': (original_freq, substitute_freq),
+                'topic_shift': topic_shift
+            }
     elif variant == 'frequency':
         most_frequent = entity_mention_counter.most_common(nr_most_frequent)
 
@@ -210,59 +222,92 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     return dataset
 
 
-def output(df):
+def output(df, location='.'):
     import seaborn as sns
     import matplotlib.pyplot as plt
+    import os
 
-    def scatter_plot(x, y, data):
-        f, ax = plt.subplots(figsize=(6.5, 6.5))
-        sns.despine(f, left=True, bottom=True)
-        sns.scatterplot(x=x, y=y, size=1, data=data, ax=ax, linewidth=0)
-        plt.savefig(f'{x}.png')
+    metrics = [k for k in df.columns if 'metric' in k]
+    correct_in = 'correct' in df.columns
+    
+    sp_kws = {
+        'squeeze': False,
+        'nrows': 2 + (1 if correct_in else 0),
+        'ncols': len(metrics),
+    }
+    sp_kws['figsize'] = (sp_kws['ncols'] * 4.8, sp_kws['nrows'] * 4.8)
 
+    def scatter_plot(**kwargs):
+        sns.scatterplot(**kwargs, s=2, linewidth=0)
 
     if 'topic_shift' in df.columns:
         # calculate average topic_shift per sample
         df['topic_shift_avg'] = df['topic_shift'].apply(np.mean)
 
-        print(df['metric'].corr(df['topic_shift_avg']))
-        scatter_plot('topic_shift_avg', 'metric', df)        
+        f, axs = plt.subplots(**sp_kws)
+        
+        for i,metric in enumerate(metrics):
+            print(df[metric].corr(df['topic_shift_avg']))
+            
+            scatter_plot(x='topic_shift_avg', y=metric, data=df, ax=axs[0, i])
+            draw_histwithmean(df['topic_shift_avg'], df[metric], ax=axs[1, i])
+
+        if correct_in:
+            sns.violinplot(x='topic_shift_avg', y='correct', orient='h', inner='box', data=df, ax=axs[2, 0])
+
+        f.savefig(os.path.join(location, 'topic_shift_avg.png'))
 
     if 'frequencies' in df.columns:
-        # calculate average difference in frequency
-        df['frequency_shift'] = df['frequencies'].apply(
-            lambda sample: list(map(lambda freqs: freqs[0] + freqs[1], sample))
-        )
-        df['frequency_shift_avg'] = df['frequency_shift'].apply(np.mean)
-
         # calculate average difference in log-frequency
-        df['log_frequency_shift'] = df['frequencies'].apply(
+        df['shift_of_log_frequency'] = df['frequencies'].apply(
             lambda sample: list(map(lambda freqs: math.log(freqs[0]) + math.log(freqs[1]), sample))
         )
-        df['log_frequency_shift_avg'] = df['log_frequency_shift'].apply(np.mean)
-
-        # calculate average multiplicative difference in frequency
-        df['mul_frequency_shift'] = df['log_frequency_shift'].apply(
-            lambda sample: list(map(np.exp, sample))
+        # calculate average difference in log-frequency
+        df['log_of_frequency_shift'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: math.log(freqs[0] + freqs[1]), sample))
         )
-        df['mul_frequency_shift_avg'] = df['mul_frequency_shift'].apply(np.mean)
 
         # calculate average difference in frequency
-        df['frequency_diff'] = df['frequencies'].apply(
-            lambda sample: list(map(lambda freqs: abs(freqs[0] - freqs[1]), sample))
-        )
-        df['frequency_diff_avg'] = df['frequency_diff'].apply(np.mean)
-
-        # calculate average difference in frequency
-        df['log_frequency_diff'] = df['frequencies'].apply(
+        df['log_of_absfrequency_diff'] = df['frequencies'].apply(
             lambda sample: list(map(lambda freqs: math.log(1 + abs(freqs[0] - freqs[1])), sample))
         )
-        df['log_frequency_diff_avg'] = df['log_frequency_diff'].apply(np.mean)
-       
-        for value in ['frequency_shift_avg', 'log_frequency_shift_avg', 'mul_frequency_shift_avg', 'frequency_diff_avg', 'log_frequency_diff_avg']:
-            print(df['metric'].corr(df[value]))
-            scatter_plot(value, 'metric', df)        
-       
+        df['diff_of_log_frequency'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: math.log(1 + freqs[0]) - math.log(1 + freqs[1]), sample))
+        )
+        df['absdiff_of_log_frequency'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: abs(math.log(1 + freqs[0]) - math.log(1 + freqs[1])), sample))
+        )
+
+
+        df['max_log_frequency'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: math.log(max(freqs)), sample))
+        )
+        df['min_log_frequency'] = df['frequencies'].apply(
+            lambda sample: list(map(lambda freqs: math.log(min(freqs)), sample))
+        )
+
+        for key in [k for k in df.columns if 'frequency' in k]:
+            avg_key = f"{key}_avg"
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                df[avg_key] = df[key].apply(np.mean)
+
+            correct_in = 'correct' in df.columns
+            f, axs = plt.subplots(**sp_kws)
+            sns.despine(f, left=True, bottom=True)
+
+            for i, metric_key in enumerate(metrics):
+                print(f"\nCorrelation between {avg_key} and {metric_key}...")
+                print(df[metric_key].corr(df[avg_key]))
+                
+                scatter_plot(x=avg_key, y=metric_key, data=df, ax=axs[0, i])
+                draw_histwithmean(df[avg_key], df[metric_key], ax=axs[1, i])
+
+            if correct_in:
+                sns.violinplot(x=avg_key, y='correct', orient='h', inner='box', data=df, ax=axs[2, 0])
+
+            f.savefig(os.path.join(location, f'{avg_key}.png'))
 
 
 def analysis(cli_config, trainer, model, eval_dataset):
@@ -278,8 +323,10 @@ def analysis(cli_config, trainer, model, eval_dataset):
         batch_size=cli_config['batch_size_eval'],
         collate_fn=trainer.data_collator
     )
+
     correctness = []
     label_probs = []
+    losses = []
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model.to(device)
@@ -293,16 +340,21 @@ def analysis(cli_config, trainer, model, eval_dataset):
         logits = outputs['nc-0_logits']
         probs = torch.nn.functional.softmax(logits, dim=-1)
 
-        _label_probs = torch.gather(probs, -1, batch['nc_labels'].unsqueeze(-1))
-        label_probs.extend(_label_probs.squeeze().tolist())
+        #_label_probs = torch.gather(probs, -1, batch['nc_labels'].unsqueeze(-1))
+        #label_probs.extend(_label_probs.squeeze().tolist())
+        
+        loss = torch.nn.functional.cross_entropy(logits, batch['nc_labels'], reduction='none')
+        losses.extend(loss.squeeze().tolist())
 
         predictions = torch.argmax(logits, dim=-1)
         correct = predictions == batch['nc_labels']
         correctness.extend(correct.tolist())
 
-    df['metric'] = label_probs
+    #df['metric'] = label_probs
+    df['metric_loss'] = losses
+    df['correct'] = correctness
 
-    output(df)
+    output(df, cli_config['run_path'])
 
 
 def entitypoor_argparse(parser: argparse.ArgumentParser):

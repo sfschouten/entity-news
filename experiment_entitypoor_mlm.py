@@ -22,7 +22,6 @@ def entity_poor_news_data(config, tokenizer):
 def analysis(cli_config, trainer, model, eval_dataset):
     # convert dataset to pandas dataframe
     df = pd.DataFrame(eval_dataset)
-    print(df.columns)
 
     eval_dataset = eval_dataset.remove_columns(
         [c for c in eval_dataset.column_names if c not in ['input_ids', 'attention_mask']]
@@ -32,7 +31,9 @@ def analysis(cli_config, trainer, model, eval_dataset):
         batch_size=cli_config['batch_size_eval'],
         collate_fn=trainer.data_collator
     )
+
     losses = []
+    accuracies = []
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model.eval()
@@ -41,12 +42,21 @@ def analysis(cli_config, trainer, model, eval_dataset):
         with torch.no_grad():
             outputs = model(**batch)
 
-        loss = outputs.loss
-        losses.extend(list(loss))
+        logits = outputs['mlm-0_logits']
+        N, M, C = logits.shape
+        
+        loss = torch.nn.functional.cross_entropy(logits.view(-1, C), batch['mlm_labels'].view(-1), reduction='none')
+        loss = torch.mean(loss.view(N, M), dim=1)
+        losses.extend(loss.squeeze().tolist())
 
-    df['metric'] = losses
+        predictions = torch.argmax(logits, dim=-1)
+        accuracy = torch.mean((predictions == batch['mlm_labels']).float(), dim=1)
+        accuracies.extend(accuracy.squeeze().tolist())
+    
+    df['metric_loss'] = losses
+    df['metric_accuracy'] = accuracies 
 
-    output(df)
+    output(df, location=cli_config['run_path'])
 
 
 if __name__ == "__main__":

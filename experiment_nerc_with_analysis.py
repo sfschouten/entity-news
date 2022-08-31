@@ -2,8 +2,9 @@ import argparse
 from collections import Counter
 
 from transformers import AutoTokenizer
+
 import numpy as np
-from scipy.stats import entropy
+import scipy.stats
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -74,7 +75,7 @@ def train_nerc_and_analyze(cli_config):
                 mention_acc = mention_acc_a and mention_acc_b == len(mention.token_idxs[1:])
                 metrics.append([
                     entity_mention_count[mention],
-                    entropy(topic_dists[mention]),
+                    scipy.stats.entropy(topic_dists[mention]),
                     mention_acc,        # true accuracy, requiring full mention to be tagged
                     mention_acc_a       # only B-tag required
                 ])
@@ -131,18 +132,26 @@ def train_nerc_and_analyze(cli_config):
     calc_meantest(topic_entropy, correct)
 
 
-def draw_histwithmean(variable, correct, nr_bins=6, labels_fn=lambda _: None):
+def draw_histwithmean(variable, metric, nr_bins=7, labels_fn=lambda _: None, ax=None, confidence=.95):
     bins = np.linspace(variable.min(), variable.max() + 1e-12, nr_bins + 1)
     c = np.digitize(variable, bins)
-    means = [np.mean(correct[c == i]) for i in range(1, len(bins))]
-    stderrs = [1.96 * np.std(correct[c == i]) / np.sqrt(np.sum(c == i)) for i in range(1, len(bins))]
-    plt.bar(bins[:-1], means, width=bins[1] - bins[0], align='edge', ec='black', yerr=stderrs)
-    plt.xticks(bins, labels=labels_fn(bins), rotation=45)
-    plt.margins(x=0.02)
-    print(f'bins: {bins}')
-    print(f'means: {means}')
-    print(f'std err: {stderrs}')
-    print()
+
+    mean = [np.mean(metric[c == i]) for i in range(1, len(bins))]
+    count = [np.sum(c == i) for i in range(1, len(bins))]
+
+    ci = [scipy.stats.sem(metric[c == i]) 
+            * scipy.stats.t.ppf((1+confidence) / 2., count[i-1]) for i in range(1, len(bins))]
+
+    ax.bar(bins[:-1], mean, width=bins[1] - bins[0], align='edge', ec='black', yerr=ci)
+    ax.set_xticks(bins, labels=labels_fn(bins), rotation=45)
+    ax.margins(x=0.02)
+    
+    with np.printoptions(precision=5):
+        print(f'bins: {bin}')
+        print(f'means: {mean}')
+        print(f'ci-{confidence}: {ci}')
+        print(f'counts: {count}')
+        print()
 
 
 def calc_meantest(variable, correct):
