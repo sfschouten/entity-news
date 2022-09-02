@@ -226,6 +226,8 @@ def output(df, location='.'):
     import seaborn as sns
     import matplotlib.pyplot as plt
     import os
+    import pprint
+    import csv
 
     metrics = [k for k in df.columns if 'metric' in k]
     correct_in = 'correct' in df.columns
@@ -237,6 +239,11 @@ def output(df, location='.'):
     }
     sp_kws['figsize'] = (sp_kws['ncols'] * 4.8, sp_kws['nrows'] * 4.8)
 
+    correlations = {}
+
+    def save_correlation(key1, key2):
+        correlations[key1, key2] = df[key1].corr(df[key2])
+
     def scatter_plot(**kwargs):
         sns.scatterplot(**kwargs, s=2, linewidth=0)
 
@@ -247,7 +254,7 @@ def output(df, location='.'):
         f, axs = plt.subplots(**sp_kws)
         
         for i,metric in enumerate(metrics):
-            print(df[metric].corr(df['topic_shift_avg']))
+            save_correlation(metric, 'topic_shift_avg')
             
             scatter_plot(x='topic_shift_avg', y=metric, data=df, ax=axs[0, i])
             draw_histwithmean(df['topic_shift_avg'], df[metric], ax=axs[1, i])
@@ -299,7 +306,7 @@ def output(df, location='.'):
 
             for i, metric_key in enumerate(metrics):
                 print(f"\nCorrelation between {avg_key} and {metric_key}...")
-                print(df[metric_key].corr(df[avg_key]))
+                save_correlation(metric_key, avg_key)
                 
                 scatter_plot(x=avg_key, y=metric_key, data=df, ax=axs[0, i])
                 draw_histwithmean(df[avg_key], df[metric_key], ax=axs[1, i])
@@ -308,6 +315,12 @@ def output(df, location='.'):
                 sns.violinplot(x=avg_key, y='correct', orient='h', inner='box', data=df, ax=axs[2, 0])
 
             f.savefig(os.path.join(location, f'{avg_key}.png'))
+
+    pprint.pprint(correlations)
+    with open(os.path.join(location, f'correlations.csv'), 'w') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=['metric', 'column', 'correlation'])
+        writer.writeheader()
+        writer.writerows([ {'metric': m, 'column': col, 'correlation': cor} for (m, col), cor in correlations.items() ])
 
 
 def analysis(cli_config, trainer, model, eval_dataset):
