@@ -1,7 +1,10 @@
 import sys
+import argparse
+import warnings
+import math
 
 from tqdm import tqdm
-from scipy.special import softmax, gammaln, digamma, rel_entr
+from scipy.special import softmax, gammaln, digamma, rel_entr, log_softmax, logsumexp
 
 import numpy as np
 import seaborn as sns
@@ -105,40 +108,115 @@ def ml_dirichlet_based_uncertainty(logits):
 def lakshminarayanan_uncertainty(logits):
     """
     """
+    np.set_printoptions(threshold=sys.maxsize)
 
-    predictions = softmax(logits, axis=-1)
+    N, M, K = logits.shape
+
+    mask_tokens = np.all(logits[:, 0:1, :] == -100, axis=2, keepdims=True)
+    mask_tokens = np.broadcast_to(mask_tokens, (N, M, K))
+    logits = logits[~mask_tokens].reshape(-1, M, K)
+
+    logits[logits==-100] = float('-inf')
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        
+        predictions = log_softmax(logits, axis=-1)                  # N x M x K
 
     # average over model instances to obtain ensemble prediction
-    prediction_E = predictions.mean(axis=1)
+    prediction_E = logsumexp(predictions, axis=1) - np.log(M)   # N x K
 
     # calculate kl divergence between predictions and ensemble prediction 
-    divergences = rel_entr(predictions.swapaxes(0,1), prediction_E).sum(-1)
+    predictions = predictions.swapaxes(0,1)                     # M x N x K
+    divergences = np.sum(np.exp(predictions) * (predictions - prediction_E), axis=-1)   # M x N
 
     # average over model instances to obtain disagreements
-    disagreements = divergences.mean(axis=0)
+    disagreements = divergences.mean(axis=0)                    # N
 
+    disagreement_mean = disagreements.mean()
+    #disagreement_std = disagreements.std()
 
-    print(f"Mean disagreement is {disagreements.mean()}; with standard deviation of {disagreements.std()}")
+    print(f"Mean disagreement is {disagreement_mean})") #; with standard deviation of {disagreement_std}")
 
-    np.save("disagreements.npy", disagreements)
+    #np.save("disagreements.npy", disagreements)
 
-    sns.kdeplot(data=disagreements)
-    plt.savefig("disagreements.png")
+    #sns.kdeplot(data=disagreements)
+    #plt.savefig("disagreements.png")
 
+    return disagreements.sum(), len(disagreements) 
 
 if __name__ == "__main__":
 
-    logits = []
-    for i, arg in enumerate(sys.argv[1:]):
-        print(f"loading {arg}")
-        logits_ = np.loadtxt(arg)
-        logits.append(logits_)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('files', nargs='+')
+    parser.add_argument('--file_format', default='npy', choices=['npy', 'npy-mmap', 'txt'])
+    parser.add_argument('--shape', nargs='*', type=int)
+    parser.add_argument('--uncertainty_metric', default='lakshminarayanan', choices=['lackshminarayanan'])
+    parser.add_argument('--nr_steps', default=10, type=int)
+    parser.add_argument('--step_size', type=int)
+    parser.add_argument('--skip_check', action='store_true')
+    args = parser.parse_args()
 
-    logits = np.stack(logits, axis=1) # N, M, K
-    N, M, K = logits.shape
+    def check(logits):
+        _, M, _ = logits.shape
+        for i in range(M-1):
+            arr1 = logits[:, i, :] != -100
+            arr2 = logits[:, i+1, :] != -100
+            assert np.array_equal(arr1, arr2), \
+                    f"Logits from {args.files[i]} & {args.files[i+1]} do not share a padding pattern. " \
+                +   f"Nr of incongruent pads: {np.sum(np.logical_xor(arr1, arr2))}."
 
-    lakshminarayanan_uncertainty(logits)
-    ml_dirichlet_based_uncertainty(logits)
+    def calc(logits):
+        if args.uncertainty_metric == 'lakshminarayanan':
+            return lakshminarayanan_uncertainty(logits)
+        elif args.uncertainty_metric == 'ml-dirichlet':
+            return ml_dirichlet_based_uncertainty(logits)
+
+    if args.file_format != 'npy-mmap':
+        logits = []
+        for i, arg in enumerate(args.files):
+            print(f"loading {arg}")
+            if args.file_format == 'txt':
+                logits_ = np.loadtxt(arg)
+            elif args.file_format == 'npy':
+                logits_ = np.load(arg)
+            logits.append(logits_)
+
+        logits = np.stack(logits, axis=1) # N, M, K
+        check(logits)
+        calc(logits)
+    else:
+        nr_samples = args.shape[0]
+        if args.step_size is not None:
+            step_size = args.step_size
+            nr_steps = math.ceil(nr_samples / step_size)
+            print(f"nr steps: {nr_steps}")
+        else:
+            nr_steps = args.nr_steps
+            step_size = nr_samples // args.nr_steps
+            print(f"step size: {step_size}")
+
+        memmaps = [
+            np.memmap(f, mode='r', dtype='float16', shape=tuple(args.shape))
+            for f in args.files
+        ]
+
+        disagreement_total = 0
+        count_total = 0
+        for o in tqdm(range(nr_samples-step_size, nr_samples-nr_steps*step_size-1, -step_size)):
+            logits = []
+            for arr in memmaps:
+                logits_ = arr[max(o, 0):o+step_size]
+                logits.append(logits_)
+            logits = np.stack(logits, axis=1)
+           
+            if not args.skip_check:
+                check(logits)
+
+            disagreement, count = calc(logits)
+            disagreement_total += disagreement
+            count_total += count
+
+            print(f"New total average: {disagreement_total/count_total}")
         
 
 
