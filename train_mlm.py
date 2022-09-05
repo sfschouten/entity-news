@@ -3,9 +3,11 @@ import pprint
 from collections import OrderedDict
 from functools import partial
 
+import wandb
+
 from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, \
-    Trainer, EarlyStoppingCallback, AutoModelForMaskedLM
+    Trainer, EarlyStoppingCallback, AutoModelForMaskedLM, set_seed
 
 import utils
 from data_collator import DataCollatorForLanguageModeling
@@ -13,12 +15,12 @@ from modeling_versatile import MaskedLM
 from train_news_clf import news_clf_dataset
 from utils import create_run_folder_and_config_dict, create_or_load_versatile_model, train_versatile
 
-import wandb
-
-
 
 def train_mlm(cli_config, dataset_fn=news_clf_dataset):
     wandb.init(project='entity-news', tags=['MLM'])
+
+    # set seed to make sure that the masking happens the same way for each model instance.
+    set_seed(cli_config['seed'])
 
     head_id = cli_config['head_id']
 
@@ -106,6 +108,7 @@ def train_mlm_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--probing', action='store_true')
     parser.add_argument('--head_id', default='mlm-0', type=str)
     parser.add_argument('--use_pretrained_mlm_weights', action='store_true')
+    parser.add_argument('--seed', default=19930729, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
