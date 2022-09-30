@@ -1,11 +1,9 @@
 import argparse
 import pprint
 from collections import OrderedDict
-from functools import partial
 
 import wandb
 
-from datasets import load_metric
 from transformers import AutoTokenizer, TrainingArguments, \
     Trainer, EarlyStoppingCallback, AutoModelForMaskedLM, set_seed
 

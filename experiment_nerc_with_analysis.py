@@ -2,10 +2,10 @@ import argparse
 from collections import Counter
 
 from transformers import AutoTokenizer
+import wandb
 
 import numpy as np
 import scipy.stats
-
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -90,44 +90,43 @@ def train_nerc_and_analyze(cli_config):
     freq, topic_entropy, _, correct = [
         np.squeeze(subarr) for subarr in np.split(metrics_arr, 4, axis=1)]
 
+    fig, axs = plt.subplots(nrows=2, ncols=2, squeeze=False)
+
     # violin plot
-    plt.xlim(0, 600)
-    sns.violinplot(x=freq, y=correct, orient='h', inner='box')
-    plt.xlabel('Frequency')
-    plt.yticks(np.array([0, 1]), ['Incorrect', 'Correct'])
-    plt.tight_layout()
-    plt.savefig(cli_config['run_path'] + '/correct_freq_violin.png')
-    plt.clf()
+    axs[0, 0].set_xlim(0, 600)
+    sns.violinplot(x=freq, y=correct, orient='h', inner='box', ax=axs[0, 0])
+    axs[0, 0].set_xlabel('Frequency')
+    axs[0, 0].set_yticks(np.array([0, 1]))
+    axs[0, 0].set_yticklabels(['Incorrect', 'Correct'])
 
     #sns.violinplot(x=freq, y=correct, orient='h', inner='box', hue=types)
     #plt.savefig(cli_config['run_path'] + '/correct_freq_type_violins.png')
     #plt.clf()
 
     #  histogram
-    draw_histwithmean(np.log(freq), correct, nr_bins=6,
+    draw_histwithmean(np.log(freq), correct, ax=axs[0, 1],
                       labels_fn=lambda bins: map('{:.01f}'.format, np.exp(bins)))
-    plt.xlabel('Frequency')
-    plt.ylabel('Accuracy')
-    plt.tight_layout()
-    plt.savefig(cli_config['run_path'] + '/correct_freq_hist.png')
-    plt.clf()
+    axs[0, 1].set_xlabel('Frequency')
+    axs[0, 1].set_ylabel('Accuracy')
 
     calc_meantest(freq, correct)
 
     # accuracy probe vs. topic distribution entropy
-    sns.violinplot(x=topic_entropy, y=correct, orient='h', inner='box')
-    plt.xlabel('Entropy')
-    plt.yticks(np.array([0, 1]), ['Incorrect', 'Correct'])
-    plt.tight_layout()
-    plt.savefig(cli_config['run_path'] + '/correct_entropy_violin.png')
-    plt.clf()
+    sns.violinplot(x=topic_entropy, y=correct, orient='h', inner='box', ax=axs[1, 0])
+    axs[1, 0].set_xlabel('Entropy')
+    axs[1, 0].set_yticks(np.array([0, 1]))
+    axs[1, 0].set_yticklabels(['Incorrect', 'Correct'])
 
-    draw_histwithmean(topic_entropy, correct)
-    plt.xlabel('Entropy')
-    plt.ylabel('Accuracy')
-    plt.tight_layout()
-    plt.savefig(cli_config['run_path'] + '/correct_entropy_hist.png')
-    plt.clf()
+    draw_histwithmean(topic_entropy, correct, ax=axs[1, 1])
+    axs[1, 1].set_xlabel('Entropy')
+    axs[1, 1].set_ylabel('Accuracy')
+
+    fig.savefig(cli_config['run_path'] + '/nerc_probe_analysis.png')
+    wandb.log({'nerc_probe_analysis': fig})
+
+    pearson = scipy.stats.pearsonr(topic_entropy, correct)
+
+    wandb.log({'correlation'})
 
     calc_meantest(topic_entropy, correct)
 
@@ -143,7 +142,10 @@ def draw_histwithmean(variable, metric, nr_bins=7, labels_fn=lambda _: None, ax=
             * scipy.stats.t.ppf((1+confidence) / 2., count[i-1]) for i in range(1, len(bins))]
 
     ax.bar(bins[:-1], mean, width=bins[1] - bins[0], align='edge', ec='black', yerr=ci)
-    ax.set_xticks(bins, labels=labels_fn(bins), rotation=45)
+    ax.set_xticks(bins)
+    labels = labels_fn(bins)
+    if labels:
+        ax.set_xticklabels(labels, rotation=45)
     ax.margins(x=0.02)
     
     with np.printoptions(precision=5):

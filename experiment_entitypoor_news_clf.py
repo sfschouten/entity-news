@@ -320,7 +320,7 @@ def output(df, location='.'):
     with open(os.path.join(location, f'correlations.csv'), 'w') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=['metric', 'column', 'correlation'])
         writer.writeheader()
-        writer.writerows([ {'metric': m, 'column': col, 'correlation': cor} for (m, col), cor in correlations.items() ])
+        writer.writerows([{'metric': m, 'column': col, 'correlation': cor} for (m, col), cor in correlations.items()])
 
 
 def analysis(cli_config, trainer, model, eval_dataset):
