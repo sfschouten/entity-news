@@ -28,7 +28,7 @@ VERSIONS = ['mask', 'substitute']
 SUB_VARIANTS = ['random_tokens', 'random_mention', 'type_invariant', 'frequency', 'topic_shift']
 
 
-def mask_entities(samples):
+def mask_entities(samples, tokenizer=None):
     input_ids = samples['input_ids']
     ner_preds = samples['ner']
 
@@ -54,7 +54,7 @@ def substitute_entities(samples, nr_most_frequent=100, variant="random-mention",
 
         def sample_fn(mention: Mention):
             entity = random.sample(unique, 1)[0]
-            return random.samples(vocab, len(entity.token_ids)),
+            return random.sample(vocab, len(entity.token_ids)),
     elif variant == 'random_mention':
         unique = list(set(entity_mentions))
 
@@ -94,14 +94,14 @@ def substitute_entities(samples, nr_most_frequent=100, variant="random-mention",
         most_frequent = entity_mention_counter.most_common(nr_most_frequent)
 
         # print most frequent
-        #print(sorted([
-        #    tokenizer.convert_ids_to_tokens(mention.token_ids)
-        #    for mention, _ in most_frequent
-        #]))
+        print(sorted([
+            tokenizer.convert_ids_to_tokens(mention.token_ids)
+            for mention, _ in most_frequent
+        ]))
 
         def sample_fn(_):
             entity, _ = random.sample(most_frequent, 1)[0]
-        return entity.token_ids,
+            return entity.token_ids,
     elif variant == 'topic_shift':
 
         return {}
@@ -204,21 +204,21 @@ def entity_poor_news_clf_dataset(cli_config, tokenizer):
     nr_topics = len(dataset['train'].features['labels'].names)
 
     if cli_config['experiment_version'] == 'mask':
-        fn = mask_entities
+        dataset = dataset.map(mask_entities, batched=True, batch_size=None, fn_kwargs={'tokenizer': tokenizer})
     elif cli_config['experiment_version'] == 'substitute':
-        fn = substitute_entities
-    else:
-        raise ValueError(f"Invalid version of experiment: {cli_config['experiment_version']}")
-
-    dataset = dataset.map(
-            fn, batched=True, batch_size=None, fn_kwargs={
+        dataset = dataset.map(
+            substitute_entities, batched=True, batch_size=None, fn_kwargs={
                 'variant': cli_config['substitute_variant'],
                 'nr_most_frequent': cli_config['nr_most_frequent'], 
                 'nr_topics': nr_topics, 
                 'cli_config': cli_config, 
                 'tokenizer': tokenizer
             }, load_from_cache_file=True
-    ).remove_columns(['ner', 'incident.wdt_id'])
+        )
+    else:
+        raise ValueError(f"Invalid version of experiment: {cli_config['experiment_version']}")
+
+    dataset = dataset.remove_columns(['ner', 'incident.wdt_id'])
     return dataset
 
 
