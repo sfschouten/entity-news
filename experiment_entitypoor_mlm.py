@@ -62,7 +62,7 @@ def analysis(cli_config, trainer, model, eval_dataset):
         # not all logits are relevant, only those tokens that were masked for prediction
         # we move all these tokens to the front
         relevant_idx = labels != -100
-        idxs = torch.arange(max_len, device=device).unsqueeze(0).expand(N, -1)
+        idxs = torch.arange(M, device=device).unsqueeze(0).expand(N, -1)
         END_MARKER = torch.tensor(max_len, device=device).view(1, 1)
 
         # associate relevant tokens with index, and others with a number higher than all indices
