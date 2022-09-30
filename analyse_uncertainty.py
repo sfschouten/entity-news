@@ -5,6 +5,7 @@ import math
 
 from tqdm import tqdm
 from scipy.special import softmax, gammaln, digamma, rel_entr, log_softmax, logsumexp
+from scipy.stats import pearsonr, multivariate_normal
 
 import numpy as np
 import seaborn as sns
@@ -51,9 +52,8 @@ def calc_kl_with_uniform(alphas):
         alpha_0 = alphas.sum(axis=-1, keepdims=True)
         beta_0 = betas.sum(axis=-1, keepdims=True)
 
-        return gammaln(alpha_0)                                                                             \
-            - (gammaln(alphas) - gammaln(beta_0)).sum(axis=-1, keepdims=True)                               \
-            + gammaln(betas).sum(axis=-1, keepdims=True)                                                    \
+        return gammaln(alpha_0) - gammaln(alphas).sum(axis=-1, keepdims=True)                           \
+            -  gammaln(beta_0)  + gammaln(betas).sum(axis=-1, keepdims=True)                            \
             + ( (alphas - betas) * (digamma(alphas) - digamma(alpha_0)) ).sum(axis=-1, keepdims=True)
 
     # the parameters of the uniform Dirichlet
@@ -95,6 +95,9 @@ def ml_dirichlet_based_uncertainty(logits):
     entropies = calc_entropy(alphas)
     kl_uniform = calc_kl_with_uniform(alphas)
 
+    r = pearsonr(entropies, kl_uniform) 
+    print(r)
+
     print(f"Mean variance is {variances.mean()}; with standard deviation of {variances.std()} .")
     print(f"Mean entropy is {entropies.mean()}; with standard deviation of {entropies.std()} .")
     print(f"Mean KL w/ uniform-dirichlet is {kl_uniform.mean()}; with standard deviation of {kl_uniform.std()} .")
@@ -103,6 +106,39 @@ def ml_dirichlet_based_uncertainty(logits):
 
     sns.kdeplot(data=entropies)
     plt.savefig("entropies.png")
+
+def kde_based_uncertainty(logits):
+    from KDEpy import NaiveKDE
+    N, M, K = logits.shape
+
+    for bw in np.linspace(0.3, 1, num=10):
+        print(f"bandwith={bw}")
+        all_entropies = []
+        for M_logits in tqdm(logits):
+            probs = softmax(M_logits, axis=-1)
+
+            kde = NaiveKDE(bw=bw).fit(probs)
+            
+            # sample around the points on the simplex we know will have a lot of density
+
+            # estimate covariance matrix
+            cov_probs = np.cov(probs, rowvar=False)
+            mean_probs = np.mean(probs, axis=0)
+
+            # sample Gaussian around probs
+            normal_dist = multivariate_normal(mean_probs, cov_probs, allow_singular=True)
+            points = normal_dist.rvs(size=256)
+            normal_density = normal_dist.pdf(points)
+
+            #p = kde.evaluate(probs)
+            ps = kde.evaluate(grid_points=points)
+
+            entropy = -np.sum( ps * np.log(ps) / normal_density ) + gammaln(K)
+            all_entropies.append(entropy)
+
+        entropies = np.stack(all_entropies)
+
+        print(f"Mean KDE-based entropy is {entropies.mean()}; with standard deviation of {entropies.std()}")
 
 
 def lakshminarayanan_uncertainty(logits):
@@ -132,10 +168,12 @@ def lakshminarayanan_uncertainty(logits):
     # average over model instances to obtain disagreements
     disagreements = divergences.mean(axis=0)                    # N
 
+    disagreements = disagreements[~np.isnan(disagreements)]
+
     disagreement_mean = disagreements.mean()
     #disagreement_std = disagreements.std()
 
-    print(f"Mean disagreement is {disagreement_mean})") #; with standard deviation of {disagreement_std}")
+    print(f"Mean disagreement is {disagreement_mean}") #; with standard deviation of {disagreement_std}")
 
     #np.save("disagreements.npy", disagreements)
 
@@ -150,7 +188,7 @@ if __name__ == "__main__":
     parser.add_argument('files', nargs='+')
     parser.add_argument('--file_format', default='npy', choices=['npy', 'npy-mmap', 'txt'])
     parser.add_argument('--shape', nargs='*', type=int)
-    parser.add_argument('--uncertainty_metric', default='lakshminarayanan', choices=['lackshminarayanan'])
+    parser.add_argument('--uncertainty_metric', default='lakshminarayanan', choices=['lackshminarayanan', 'ml-dirichlet', 'kde-based'])
     parser.add_argument('--nr_steps', default=10, type=int)
     parser.add_argument('--step_size', type=int)
     parser.add_argument('--skip_check', action='store_true')
@@ -170,6 +208,8 @@ if __name__ == "__main__":
             return lakshminarayanan_uncertainty(logits)
         elif args.uncertainty_metric == 'ml-dirichlet':
             return ml_dirichlet_based_uncertainty(logits)
+        elif args.uncertainty_metric == 'kde-based':
+            return kde_based_uncertainty(logits)
 
     if args.file_format != 'npy-mmap':
         logits = []
