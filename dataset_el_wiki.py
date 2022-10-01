@@ -235,7 +235,7 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
 
         def new_samples(wikipedia_id):
             """
-            Checks for entities we know have mentioned the entity corresponding to `wikipedia_id',
+            Checks for entities we know have mentioned the entity corresponding to `wikipedia_id`,
             and yields them.
             """
             nonlocal m_idx
