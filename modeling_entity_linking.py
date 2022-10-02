@@ -31,6 +31,15 @@ class EntityLinking(Head):
         self.loss = nn.BCEWithLogitsLoss(reduction='mean')
 
     def forward(self, base_outputs, *args):
+        """
+
+        Args:
+            base_outputs:
+            *args:
+
+        Returns:
+
+        """
         labels, return_dict = args
         labels = labels.clone()                                                     # B x N
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -39,6 +48,7 @@ class EntityLinking(Head):
         B, N, D = hidden_states.shape
         E_ = B * N
 
+        # change -100 to padding_idx (allow for embedding PAD)
         lbl_ignore = labels == -100                                                 # B x N
         labels[lbl_ignore] = self.nr_entities - 1
         entities = self.entity_embedding(labels)
@@ -46,26 +56,28 @@ class EntityLinking(Head):
 
         # score against each entity in batch
         all_scores = torch.tensordot(hidden_states, entities, dims=([2], [1]))      # B x N x E'
+
         # separate correct entity from rest
         all_scores_sq = all_scores.view(-1, E_)                                     # B*N x E'
+        lbl_scores = all_scores_sq.diagonal().view(B, N, 1)                         # B x N x 1
 
-        lbl_scores = torch.diagonal(all_scores_sq).view(B, N, 1)                    # B x N x 1
-        oth_scores = all_scores_sq.flatten()[1:] \
-                         .view(E_-1, E_+1)[:, :-1].reshape(B, N, E_-1)              # B x N x E'-1
         # take negative samples that were scored the highest
-        neg_scores, neg_idxs = torch.topk(oth_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
+        # and make sure correct entity and PAD tokens are not part of top-k
+        all_scores_sq = all_scores_sq.clone()
+        all_scores_sq.fill_diagonal_(float('-inf'))
 
-        increment = torch.eye(B*N, E_-1, device=neg_idxs.device).cumsum(-1).long()
-        temp1 = neg_idxs.view(B*N, self.K-1)
-        temp2 = torch.gather(increment, 1, temp1)
-        neg_idxs = neg_idxs + temp2.view(B, N, self.K-1)
-
-        neg_ignore = torch.take(lbl_ignore.view(-1), neg_idxs)
-        ignore = torch.cat((neg_ignore, lbl_ignore.unsqueeze(-1)), dim=-1)
+        scr_ignore = torch.bitwise_or(
+            lbl_ignore.view(B*N, 1).expand_as(all_scores_sq),
+            lbl_ignore.view(1, B*N).expand_as(all_scores_sq),
+        )
+        all_scores_sq[scr_ignore] = float('-inf')
+        all_scores = all_scores_sq.view(B, N, E_)
+        neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
 
         # calculate loss
-        logits = torch.cat((neg_scores, lbl_scores), dim=-1)                        # B x N x K
+        logits = torch.cat((neg_scores, lbl_scores), dim=-1)                       # B x N x K
         target = torch.cat((torch.zeros_like(neg_scores), torch.ones_like(lbl_scores)), dim=-1)
+        ignore = lbl_ignore.unsqueeze(-1).expand_as(logits)
         loss = self.loss(logits[~ignore], target[~ignore])
 
         if not return_dict:
