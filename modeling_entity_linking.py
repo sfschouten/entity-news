@@ -27,7 +27,7 @@ class EntityLinking(Head):
         self.nr_entities = config_dict[f'{key}_nr_entities'] + 1  # reserve one for PAD
         self.entity_embedding = nn.Embedding(
             self.nr_entities, embedding_dim=config.hidden_size, padding_idx=self.nr_entities-1)
-        self.K = 111    # TODO make config parameter
+        self.K = 128 # TODO make config parameter
         self.loss = nn.BCEWithLogitsLoss(reduction='mean')
 
     def forward(self, base_outputs, *args):
@@ -48,34 +48,34 @@ class EntityLinking(Head):
         B, N, D = hidden_states.shape
         E_ = B * N
 
-        # change -100 to padding_idx (allow for embedding PAD)
+        # Change -100 to padding_idx (so we can embed PAD tokens).
         lbl_ignore = labels == -100                                                 # B x N
         labels[lbl_ignore] = self.nr_entities - 1
         entities = self.entity_embedding(labels)
         entities = entities.view(-1, D)                                             # E' x D
 
-        # score against each entity in batch
+        # Score against each entity in batch.
         all_scores = torch.tensordot(hidden_states, entities, dims=([2], [1]))      # B x N x E'
 
-        # separate correct entity from rest
+        # Separate scores for correct entity from the rest.
         all_scores_sq = all_scores.view(-1, E_)                                     # B*N x E'
-        lbl_scores = all_scores_sq.diagonal().view(B, N, 1)                         # B x N x 1
+        lbl_scores = all_scores_sq.diagonal().clone().view(B, N, 1)                 # B x N x 1
 
-        # take negative samples that were scored the highest
-        # and make sure correct entity and PAD tokens are not part of top-k
-        all_scores_sq = all_scores_sq.clone()
+        # Take entities from within batch that were scored the highest as negative samples.
+        # Making sure that neither the correct entity nor any PAD tokens are part of the top-k.
         all_scores_sq.fill_diagonal_(float('-inf'))
-
         scr_ignore = torch.bitwise_or(
             lbl_ignore.view(B*N, 1).expand_as(all_scores_sq),
             lbl_ignore.view(1, B*N).expand_as(all_scores_sq),
         )
         all_scores_sq[scr_ignore] = float('-inf')
-        all_scores = all_scores_sq.view(B, N, E_)
+        # If a batch contains a lot of PAD tokens or K is chosen close to B*N some -inf might get through,
+        # meaning that the exact value of the loss function is not quite correct (but the gradients are fine).
+
         neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
 
-        # calculate loss
-        logits = torch.cat((neg_scores, lbl_scores), dim=-1)                       # B x N x K
+        # Calculate loss.
+        logits = torch.cat((neg_scores, lbl_scores), dim=-1)                        # B x N x K
         target = torch.cat((torch.zeros_like(neg_scores), torch.ones_like(lbl_scores)), dim=-1)
         ignore = lbl_ignore.unsqueeze(-1).expand_as(logits)
         loss = self.loss(logits[~ignore], target[~ignore])
