@@ -3,7 +3,8 @@ import argparse
 import numpy as np
 
 from datasets import load_dataset, DatasetDict, ClassLabel
-from transformers import AutoTokenizer, BatchEncoding, TrainingArguments, Trainer, EarlyStoppingCallback
+from transformers import AutoTokenizer, BatchEncoding, TrainingArguments, Trainer, EarlyStoppingCallback, \
+    TrainerCallback, TrainerState, TrainerControl
 
 import wandb
 
@@ -152,6 +153,21 @@ def train_entity_linking(cli_config):
         warmup_steps=cli_config['warmup_steps'],
         report_to=cli_config['report_to'],
     )
+
+    class UnfreezeCallback(TrainerCallback):
+        def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+            if state.epoch == cli_config['frozen_until']:
+                for param in model.base_model.parameters():
+                    param.requires_grad = True
+
+    callbacks = []
+    if cli_config['early_stopping_patience']:
+        callbacks.append(EarlyStoppingCallback(
+            early_stopping_patience=cli_config['early_stopping_patience'],
+        ))
+    if cli_config['frozen_until']:
+        callbacks.append(UnfreezeCallback())
+
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -162,15 +178,10 @@ def train_entity_linking(cli_config):
             tokenizer=tokenizer,
             label_name='nel_labels'
         ),
-        callbacks=[
-            EarlyStoppingCallback(
-                early_stopping_patience=cli_config['early_stopping_patience'],
-                early_stopping_threshold=cli_config['early_stopping_threshold']
-            )
-        ]
+        callbacks=callbacks,
     )
 
-    if cli_config['probing']:
+    if cli_config['probing'] or cli_config['frozen_until']:
         for param in model.base_model.parameters():
             param.requires_grad = False
 
@@ -178,6 +189,7 @@ def train_entity_linking(cli_config):
     hidden_state_keys = [f'{key}_hidden_states' for key in heads.keys()]
 
     train_versatile(cli_config, trainer, eval_ignore=hidden_state_keys)
+
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     for test_set in cli_config['test_dataset']:
         if test_set == 'kilt':
@@ -193,7 +205,10 @@ def train_entity_linking(cli_config):
 def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     parser = utils.base_train_argparse(parser)
 
-    parser.add_argument('--probing', action='store_true')
+    parser.add_argument('--probing', action='store_true', help="If the base model's weights should remain frozen.")
+    parser.add_argument('--frozen_until', default=4, type=int, help="Keep base model's weights frozen until this "
+                                                                    "epoch.")
+
     parser.add_argument('--head_id', default='nel-0', type=str)
     parser.add_argument('--head_attach_layer', default=-1, type=int)
 
@@ -212,8 +227,7 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
     parser.add_argument('--warmup_steps', default=2000, type=int)
-    parser.add_argument('--early_stopping_patience', default=10, type=int)
-    parser.add_argument('--early_stopping_threshold', default=0.6, type=float)
+    parser.add_argument('--early_stopping_patience', default=0, type=int)
     parser.add_argument('--batch_size_train', default=64, type=int)
     parser.add_argument('--batch_size_eval', default=64, type=int)
     parser.add_argument('--gradient_acc_steps', default=1, type=int)
