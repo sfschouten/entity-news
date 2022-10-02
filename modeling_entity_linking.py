@@ -69,9 +69,8 @@ class EntityLinking(Head):
             lbl_ignore.view(1, B*N).expand_as(all_scores_sq),
         )
         all_scores_sq[scr_ignore] = float('-inf')
-        # If a batch contains a lot of PAD tokens or K is chosen close to B*N some -inf might get through,
-        # meaning that the exact value of the loss function is not quite correct (but the gradients are fine).
-
+        # If a batch contains a lot of PAD tokens or K is chosen close to B*N some -inf might get through. However,
+        # they will obtain a sigmoid activation of zero, which is also their target so should not be a problem.
         neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
 
         # Calculate loss.
