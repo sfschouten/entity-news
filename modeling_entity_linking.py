@@ -20,14 +20,17 @@ class EntityLinking(Head):
         super().__init__(key, config)
         config_dict = config.to_dict()
 
-        # TODO: add dropout?
         # TODO: add additional transformations before linking?
+        # TODO: add dropout?
+
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
         self.nr_entities = config_dict[f'{key}_nr_entities'] + 1  # reserve one for PAD
         self.entity_embedding = nn.Embedding(
             self.nr_entities, embedding_dim=config.hidden_size, padding_idx=self.nr_entities-1)
-        self.K = 128 # TODO make config parameter
+        print(f"Embedding dimensions: {self.entity_embedding.weight.shape}")
+
+        self.K = 128  # TODO make config parameter
         self.loss = nn.BCEWithLogitsLoss(reduction='mean')
 
     def forward(self, base_outputs, *args):
