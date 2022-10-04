@@ -53,6 +53,8 @@ def kilt_for_el_dataset(config, tokenizer):
     kwargs = {}
     if config['nel_dataset_size']:
         kwargs['max_samples'] = config['nel_dataset_size']
+    if config['nel_minimum_nr_mentions']:
+        kwargs['minimum_mentions'] = config['nel_minimum_nr_mentions']
     dataset = load_dataset(
         dataset_el_wiki.__file__,
         split='full',
@@ -91,22 +93,48 @@ def kilt_for_el_dataset(config, tokenizer):
 def compute_nel_metrics(eval_pred):
     logits, labels = eval_pred                                              # B x N x K,  B x N
     B, N, K = logits.shape
+
+    _labels1 = np.concatenate((labels, labels[:, -2:-1]), axis=-1)
+    _labels2 = np.concatenate((labels[:, 0:1], labels), axis=-1)
+    transitions = (_labels1 != _labels2)[:, :-1]
+    entity_transitions = np.bitwise_and(transitions, labels > 0)
+    entity_numbering = entity_transitions.flatten().cumsum()
+    entity_numbering = entity_numbering[labels.flatten() > 0]
+    entity_onehot = np.eye(np.max(entity_numbering)+1)[entity_numbering].astype(bool)[:, 1:]
+
     preds = logits.argmax(axis=-1)                                          # B x N
+    correct = preds == K-1
 
-    correct = preds == K
+    # TODO we need to know whether or not the predictions are 'O' or not
 
-    nr_correct = correct.sum()
-    nr_predict = np.sum(preds > 0)
-    nr_grtruth = np.sum(labels > 0)
-    precision = nr_correct / nr_predict if nr_predict > 0 else float('inf')
-    recall = nr_correct / nr_grtruth
-    f1 = 2 * precision * recall / (precision + recall) if nr_predict > 0 else float('nan')
+    # which entity-tokens are correct
+    entity_correct = correct[labels > 0, np.newaxis] * entity_onehot
+    # if at least one of the entity-tokens is correct
+    entity_weak = entity_correct.any(axis=0)
+    # if all the entity-tokens are correct
+    entity_correct[~entity_onehot] = True   # set default value to True for `all` check.
+    entity_strong = entity_correct.all(axis=0)
+
+    nr_correct_weak = entity_weak.sum()
+    nr_correct_strong = entity_strong.sum()
+
+    nr_predict = (preds > 0).sum()  # TODO fix..
+    nr_grtruth = len(entity_strong)
+    precision_weak = nr_correct_weak / nr_predict if nr_predict > 0 else float('inf')
+    precision_strong = nr_correct_strong / nr_predict if nr_predict > 0 else float('inf')
+    recall_weak = nr_correct_weak / nr_grtruth
+    recall_strong = nr_correct_strong / nr_grtruth
+    f1_weak = 2 * precision_weak * recall_weak / (precision_weak + recall_weak) if nr_predict > 0 else float('nan')
+    f1_strong = 2 * precision_strong * recall_strong / (precision_strong + recall_strong) if nr_predict > 0 else float('nan')
 
     result = {
         'Accuracy': correct.mean(),
-        'Precision': precision,
-        'Recall': recall,
-        'F1': f1,
+        'Precision_W': precision_weak,
+        'Recall_W': recall_weak,
+        'F1_W': f1_weak,
+        'Precision_S': precision_strong,
+        'Recall_S': recall_strong,
+        'F1_S': f1_strong,
     }
     return result
 
@@ -218,6 +246,7 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--test_dataset', choices=['kilt'], default=['kilt'], nargs='*')
 
     parser.add_argument('--nel_dataset_size', default=None, type=int)
+    parser.add_argument('--nel_minimum_nr_mentions', default=0, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)

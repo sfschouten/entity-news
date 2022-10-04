@@ -126,6 +126,8 @@ class KILTWikipediaForELConfig(datasets.BuilderConfig):
 
     max_samples: int = sys.maxsize
 
+    minimum_mentions: int = 0
+
     def __post_init__(self):
         if self.optional_fields_to_add is None:
             self.optional_fields_to_add = set()
@@ -230,8 +232,8 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
         entity_idxs, entity_mentions = self.indices
         m_idx = 0
 
-        def stop_condition():
-            return m_idx + len(entity_mentions[entity['wikipedia_id']]) >= self.config.max_samples
+        def stop_condition(entity_id):
+            return m_idx + len(entity_mentions[entity_id]) >= self.config.max_samples
 
         def new_samples(wikipedia_id):
             """
@@ -265,13 +267,16 @@ class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):
 
         # Now yield the mentions.
         for entity in self.base_dataset:
-            if entity['wikipedia_id'] in entity_mentions:
-                if stop_condition():
+            entity_id = entity['wikipedia_id']
+            if entity_id in entity_mentions:
+                mentions = entity_mentions[entity_id]
+                if stop_condition(entity_id):
                     print("Reached configured maximum number of samples, stopping generation.")
                     return
-                yield from new_samples(entity['wikipedia_id'])
+                if len(mentions) >= self.config.minimum_mentions:
+                    yield from new_samples(entity_id)
 
-        print(f"All mentions have been generated. \n"
+        print(f"All valid mentions have been generated. \n"
               f"Last mention index: {m_idx}. \n")
 
 
