@@ -93,10 +93,12 @@ def kilt_for_el_dataset(config, tokenizer):
 
 def compute_nel_metrics(eval_pred):
     (logits, top_k_idxs), labels = eval_pred
-    B, N, K = logits.shape
+    _, _, K = logits.shape
+    logits = logits[logits != -100].reshape(-1, K)
+    top_k_idxs = top_k_idxs[top_k_idxs != -100].reshape(-1, K)
 
-    entity_mask = labels > 0
-    other_mask = labels == 0
+    entity_mask = labels[labels != -100] > 0                                                    # Et
+    other_mask = labels[labels != -100] == 0                                                    # Ot
     entity_logits = logits[entity_mask].reshape(-1, K)                                          # Et x K
     other_logits = logits[other_mask].reshape(-1, K)                                            # Ot x K
 
@@ -119,8 +121,8 @@ def compute_nel_metrics(eval_pred):
     # predicted entities (as entity indices)
     entity_preds_ = np.take_along_axis(top_k_idxs[entity_mask].reshape(-1, K), entity_preds[:, None], axis=1).squeeze()
     other_preds_ = np.take_along_axis(top_k_idxs[other_mask].reshape(-1, K), other_preds[:, None], axis=1).squeeze()
-    entity_correct = entity_preds == K-1                                                        # Et
-    other_correct = other_preds == K-1                                                          # Ot
+    entity_correct = entity_preds == 0                                                          # Et
+    other_correct = other_preds == 0                                                            # Ot
 
     # which entity-tokens are correct
     entity_correct = entity_correct[:, None] * entity_onehot                                    # Et x E

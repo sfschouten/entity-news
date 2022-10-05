@@ -26,7 +26,7 @@ class EntityLinking(Head):
 
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
-        self.nr_entities = config_dict[f'{key}_nr_entities'] + 1  # reserve one for PAD
+        self.nr_entities = config_dict[f'{key}_nr_entities']  # reserve one for PAD
         self.entity_embedding = nn.Embedding(
             self.nr_entities, embedding_dim=config.hidden_size, padding_idx=self.nr_entities-1)
         print(f"Embedding dimensions: {self.entity_embedding.weight.shape}")
@@ -44,53 +44,42 @@ class EntityLinking(Head):
         Returns:
 
         """
-        orig_labels, return_dict = args
-        labels = orig_labels.clone()                                                # B x N
+        labels, return_dict = args
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         hidden_states = base_outputs['hidden_states'][self.attach_layer]            # B x N x D
-        B, N, D = hidden_states.shape
-        E_ = B * N
-
-        # TODO filter PAD tokens first
 
         # Change -100 to padding_idx (so we can embed PAD tokens).
-        lbl_ignore = labels == -100                                                 # B x N
-        labels[lbl_ignore] = self.nr_entities - 1
-        entities = self.entity_embedding(labels)
-        entities = entities.view(-1, D)                                             # E' x D
+        pad_tokens = labels == -100                                                 # B x N
+        labels = labels[~pad_tokens]                                                # T
+        entities = self.entity_embedding(labels)                                    # T x D
 
         # Score against each entity in batch.
-        all_scores = torch.tensordot(hidden_states, entities, dims=([2], [1]))      # B x N x E'
+        hidden_states = hidden_states[~pad_tokens]                                  # T x D
+        all_scores = hidden_states @ entities.T                                     # T x T
+        same_labels = labels.unsqueeze(0).expand_as(all_scores) == labels.unsqueeze(1).expand_as(all_scores)
 
         # Separate scores for correct entity from the rest.
-        all_scores_sq = all_scores.view(-1, E_)                                     # B*N x E'
-        lbl_scores = all_scores_sq.diagonal().clone().view(B, N, 1)                 # B x N x 1
+        lbl_scores = all_scores.diagonal().unsqueeze(-1)                            # T x 1
 
         # Take entities from within batch that were scored the highest as negative samples.
-        # Making sure that neither the correct entity nor any PAD tokens are part of the top-k.
-        all_scores_sq.fill_diagonal_(float('-inf'))
-        scr_ignore = torch.bitwise_or(
-            lbl_ignore.view(B*N, 1).expand_as(all_scores_sq),
-            lbl_ignore.view(1, B*N).expand_as(all_scores_sq),
-        )
-        all_scores_sq[scr_ignore] = float('-inf')
-        # If a batch contains a lot of PAD tokens or K is chosen close to B*N some -inf might get through. However,
-        # they will obtain a sigmoid activation of zero, which is also their target so should not be a problem.
-        neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
-        top_k_labels = torch.take(orig_labels.view(-1), neg_idxs)
+        # Making sure that the label entities are not part of the top-k.
+        all_scores = all_scores.clone()
+        all_scores.fill_diagonal_(float('-inf'))
+        all_scores.masked_fill_(same_labels, float('-inf'))
+        neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # T x K-1,  T x K-1
+        top_k_labels = torch.take(labels, neg_idxs)
 
         # Calculate loss.
-        logits = torch.cat((neg_scores, lbl_scores), dim=-1)                        # B x N x K
-        target = torch.cat((torch.zeros_like(neg_scores), torch.ones_like(lbl_scores)), dim=-1)
-        ignore = lbl_ignore.unsqueeze(-1).expand_as(logits)
-        loss = self.loss(logits[~ignore], target[~ignore])
+        logits = torch.cat((lbl_scores, neg_scores), dim=-1)                        # T x K
+        target = torch.cat((torch.ones_like(lbl_scores), torch.zeros_like(neg_scores)), dim=-1)
+        loss = self.loss(logits[~logits.isinf()], target[~logits.isinf()])
 
         if not return_dict:
             raise NotImplementedError
 
         return EntityLinkingOutput(
             loss=loss,
-            logits=logits,
-            top_k_idxs=torch.cat((top_k_labels, labels.unsqueeze(-1)), -1)
+            logits=logits.unsqueeze(0),
+            top_k_idxs=torch.cat((labels.unsqueeze(-1), top_k_labels), -1).unsqueeze(0)
         )
