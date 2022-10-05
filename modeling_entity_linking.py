@@ -2,7 +2,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch import FloatTensor
+from torch import FloatTensor, LongTensor
 
 from transformers.file_utils import ModelOutput
 
@@ -12,6 +12,7 @@ from modeling_versatile import Head
 class EntityLinkingOutput(ModelOutput):
     loss: Optional[FloatTensor] = None
     logits: FloatTensor = None
+    top_k_idxs: LongTensor = None
 
 
 class EntityLinking(Head):
@@ -43,13 +44,15 @@ class EntityLinking(Head):
         Returns:
 
         """
-        labels, return_dict = args
-        labels = labels.clone()                                                     # B x N
+        orig_labels, return_dict = args
+        labels = orig_labels.clone()                                                # B x N
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         hidden_states = base_outputs['hidden_states'][self.attach_layer]            # B x N x D
         B, N, D = hidden_states.shape
         E_ = B * N
+
+        # TODO filter PAD tokens first
 
         # Change -100 to padding_idx (so we can embed PAD tokens).
         lbl_ignore = labels == -100                                                 # B x N
@@ -75,6 +78,7 @@ class EntityLinking(Head):
         # If a batch contains a lot of PAD tokens or K is chosen close to B*N some -inf might get through. However,
         # they will obtain a sigmoid activation of zero, which is also their target so should not be a problem.
         neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # B x N x K-1,  B x N x K-1
+        top_k_labels = torch.take(orig_labels.view(-1), neg_idxs)
 
         # Calculate loss.
         logits = torch.cat((neg_scores, lbl_scores), dim=-1)                        # B x N x K
@@ -88,4 +92,5 @@ class EntityLinking(Head):
         return EntityLinkingOutput(
             loss=loss,
             logits=logits,
+            top_k_idxs=torch.cat((top_k_labels, labels.unsqueeze(-1)), -1)
         )

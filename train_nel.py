@@ -1,5 +1,6 @@
 import argparse
 
+import datasets
 import numpy as np
 
 from datasets import load_dataset, DatasetDict, ClassLabel
@@ -91,35 +92,49 @@ def kilt_for_el_dataset(config, tokenizer):
 
 
 def compute_nel_metrics(eval_pred):
-    logits, labels = eval_pred                                              # B x N x K,  B x N
+    (logits, top_k_idxs), labels = eval_pred
     B, N, K = logits.shape
 
+    entity_mask = labels > 0
+    other_mask = labels == 0
+    entity_logits = logits[entity_mask].reshape(-1, K)                                          # Et x K
+    other_logits = logits[other_mask].reshape(-1, K)                                            # Ot x K
+
+    # = Group tokens by entity =
+    # first find transitions between sequences of tokens with the same label
     _labels1 = np.concatenate((labels, labels[:, -2:-1]), axis=-1)
     _labels2 = np.concatenate((labels[:, 0:1], labels), axis=-1)
     transitions = (_labels1 != _labels2)[:, :-1]
+    # only keep transitions into sequences of tokens labelled as an entity (label > 0)
     entity_transitions = np.bitwise_and(transitions, labels > 0)
+    # use cumsum to number entities and only keep tokens labelled as entity
     entity_numbering = entity_transitions.flatten().cumsum()
     entity_numbering = entity_numbering[labels.flatten() > 0]
     entity_onehot = np.eye(np.max(entity_numbering)+1)[entity_numbering].astype(bool)[:, 1:]
+    _, E = entity_onehot.shape
 
-    preds = logits.argmax(axis=-1)                                          # B x N
-    correct = preds == K-1
-
-    # TODO we need to know whether or not the predictions are 'O' or not
+    # predicted entities (as indices into top-k)
+    entity_preds = entity_logits.argmax(axis=-1)                                                # Et
+    other_preds = other_logits.argmax(axis=-1)                                                  # Ot
+    # predicted entities (as entity indices)
+    entity_preds_ = np.take_along_axis(top_k_idxs[entity_mask].reshape(-1, K), entity_preds[:, None], axis=1).squeeze()
+    other_preds_ = np.take_along_axis(top_k_idxs[other_mask].reshape(-1, K), other_preds[:, None], axis=1).squeeze()
+    entity_correct = entity_preds == K-1                                                        # Et
+    other_correct = other_preds == K-1                                                          # Ot
 
     # which entity-tokens are correct
-    entity_correct = correct[labels > 0, np.newaxis] * entity_onehot
-    # if at least one of the entity-tokens is correct
-    entity_weak = entity_correct.any(axis=0)
-    # if all the entity-tokens are correct
+    entity_correct = entity_correct[:, None] * entity_onehot                                    # Et x E
+    # if at least one of the entity-tokens of the entities is correct
+    entity_weak = entity_correct.any(axis=0)                                                    # E
+    # if all the entity-tokens of the entities are correct
     entity_correct[~entity_onehot] = True   # set default value to True for `all` check.
-    entity_strong = entity_correct.all(axis=0)
+    entity_strong = entity_correct.all(axis=0)                                                  # E
 
     nr_correct_weak = entity_weak.sum()
     nr_correct_strong = entity_strong.sum()
 
-    nr_predict = (preds > 0).sum()  # TODO fix..
-    nr_grtruth = len(entity_strong)
+    nr_predict = (entity_preds_ > 0).sum() + (other_preds_ > 0).sum()
+    nr_grtruth = E
     precision_weak = nr_correct_weak / nr_predict if nr_predict > 0 else float('inf')
     precision_strong = nr_correct_strong / nr_predict if nr_predict > 0 else float('inf')
     recall_weak = nr_correct_weak / nr_grtruth
@@ -128,7 +143,6 @@ def compute_nel_metrics(eval_pred):
     f1_strong = 2 * precision_strong * recall_strong / (precision_strong + recall_strong) if nr_predict > 0 else float('nan')
 
     result = {
-        'Accuracy': correct.mean(),
         'Precision_W': precision_weak,
         'Recall_W': recall_weak,
         'F1_W': f1_weak,
@@ -148,7 +162,8 @@ def train_entity_linking(cli_config):
     kilt_dataset, nr_entities = kilt_for_el_dataset(cli_config, tokenizer)
     kilt_dataset = kilt_dataset.rename_column('labels', 'nel_labels')
 
-    train_set = kilt_dataset['train']
+    #train_set = kilt_dataset['train']
+    train_set = datasets.concatenate_datasets([kilt_dataset['train'], kilt_dataset['validation']])
     valid_set = kilt_dataset['validation']
 
     # load model
@@ -250,7 +265,7 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
-    parser.add_argument('--eval_metric', default='Accuracy', type=str)
+    parser.add_argument('--eval_metric', default='F1_W', type=str)
     parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
