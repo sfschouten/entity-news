@@ -26,13 +26,45 @@ class EntityLinking(Head):
 
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
-        self.nr_entities = config_dict[f'{key}_nr_entities']  # reserve one for PAD
-        self.entity_embedding = nn.Embedding(
-            self.nr_entities, embedding_dim=config.hidden_size, padding_idx=self.nr_entities-1)
-        print(f"Embedding dimensions: {self.entity_embedding.weight.shape}")
+        self.wikipedia_id_to_idx = torch.nn.Parameter(
+            torch.full((60600000,), -1, dtype=torch.int32),
+            requires_grad=False
+        )
+        self.wikipedia_id_to_idx[0] = 0
+
+        self.entity_embedding = nn.Embedding(1, embedding_dim=config.hidden_size)
 
         self.K = 128  # TODO make config parameter
         self.loss = nn.BCEWithLogitsLoss(reduction='mean')
+
+    def extend_embedding(self, dataset):
+        import itertools
+        wikipedia_ids = [int(id) for id in set(itertools.chain.from_iterable(dataset['nel_labels']))]
+        print(f"minimum wikipedia_id: {min(wikipedia_ids)}")
+        print(f"maximum wikipedia_id: {max(wikipedia_ids)}")
+
+        wikipedia_ids = torch.tensor(wikipedia_ids)
+
+        current_embedding = self.entity_embedding
+        current_size, D = current_embedding.weight.shape
+
+        desired_ids = torch.LongTensor(wikipedia_ids)
+        desired_idxs = torch.index_select(self.wikipedia_id_to_idx, -1, desired_ids)
+
+        nr_newly_desired = len(desired_ids[desired_idxs == -1])
+        new_size = current_size + nr_newly_desired
+        print(f'There are {nr_newly_desired} newly desired wikipedia_ids.')
+        if new_size > current_size:
+            print(f'Extending the embedding to {new_size}')
+
+            self.wikipedia_id_to_idx.index_add_(
+                0, desired_ids[desired_idxs == -1],
+                torch.arange(start=current_size, end=new_size, dtype=torch.int32)
+            )
+
+            new_embedding = nn.Embedding(new_size, embedding_dim=self.config.hidden_size)
+            new_embedding.weight.data[:current_size] = current_embedding.weight.data
+            self.entity_embedding = new_embedding
 
     def forward(self, base_outputs, *args):
         """
@@ -51,7 +83,8 @@ class EntityLinking(Head):
 
         # Change -100 to padding_idx (so we can embed PAD tokens).
         pad_tokens = labels == -100                                                 # B x N
-        labels = labels[~pad_tokens]                                                # T
+        labels[~pad_tokens] = torch.index_select(self.wikipedia_id_to_idx, -1, labels[~pad_tokens]).type(labels.type())
+        labels = labels[~pad_tokens & labels != -1]                                 # T
         entities = self.entity_embedding(labels)                                    # T x D
 
         # Score against each entity in batch.
@@ -65,7 +98,6 @@ class EntityLinking(Head):
         # Take entities from within batch that were scored the highest as negative samples.
         # Making sure that the label entities are not part of the top-k.
         all_scores = all_scores.clone()
-        all_scores.fill_diagonal_(float('-inf'))
         all_scores.masked_fill_(same_labels, float('-inf'))
         neg_scores, neg_idxs = torch.topk(all_scores, self.K-1, dim=-1)             # T x K-1,  T x K-1
         top_k_labels = torch.take(labels, neg_idxs)

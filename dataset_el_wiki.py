@@ -2,7 +2,7 @@ import sys
 
 from itertools import accumulate
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, List, Set, Dict, Any
 from bisect import bisect_left
 import pickle
 
@@ -16,33 +16,46 @@ Wrapper around the KILT-Wikipedia dataset for ease of use with Entity Linking.
 """
 
 
-def basic_mention_extractor(mentioner, lookup_fn, anchor, config) -> [str, list[dict]]:
-    start = anchor['start']
-    end = anchor['end']
-    par = anchor['paragraph_id']
-    paragraphs = mentioner['text']['paragraph']
-    par_text = mentioner['text']['paragraph'][par]
+def mention_extractor(
+        mention_start_c: int,
+        mention_end_c: int,
+        mention_par_idx: int,
+        mentioning_page_paragraphs: List[str],
+        mentioning_page_mentions: List[Dict[str, List[Any]]],
+        max_mention_context_length: int = 500,
+        mentioned_page_features_to_add: Set[str] = None,
+        page_lookup_function: Callable = None,
+) -> [str, list[dict]]:
+    """
 
-    max_len = config.max_mention_context_length
-    context_len = (max_len - (end - start)) // 2
-    text = par_text[start:end]
+    Args:
+
+    Returns:
+    """
+    if mentioned_page_features_to_add is None:
+        mentioned_page_features_to_add = set()
+
+    par_text = mentioning_page_paragraphs[mention_par_idx]
+    max_len = max_mention_context_length
+    context_len = (max_len - (mention_end_c - mention_start_c)) // 2
+    text = par_text[mention_start_c:mention_end_c]
 
     # same-paragraph (local) context start/end
-    lc_start = max(start - context_len, 0)
-    lc_end = min(end + context_len, len(par_text))
+    lc_start = max(mention_start_c - context_len, 0)
+    lc_end = min(mention_end_c + context_len, len(par_text))
 
     # list of shift values (to map within-paragraph indices to full-mention indices)
     # first collect the lengths of the text to be added from each paragraph
     shifts = [len(par_text[lc_start:])]
     s = lc_start
-    l_par = r_par = par
+    l_par = r_par = mention_par_idx
 
     # left context
-    l_cxt = par_text[lc_start:start]
+    l_cxt = par_text[lc_start:mention_start_c]
     if lc_start == 0:
         while len(l_cxt) < context_len and l_par > 0:
             l_par -= 1
-            par_text_ = paragraphs[l_par]
+            par_text_ = mentioning_page_paragraphs[l_par]
             # take as much text as available and still within context_len
             s = max(0, len(par_text_) - (context_len - len(l_cxt)))
             l_cxt = par_text_[s:] + l_cxt
@@ -50,11 +63,11 @@ def basic_mention_extractor(mentioner, lookup_fn, anchor, config) -> [str, list[
     text = l_cxt + text
 
     # right context
-    r_cxt = par_text[end:lc_end]
+    r_cxt = par_text[mention_end_c:lc_end]
     if lc_end == len(par_text) - 1:
-        while len(r_cxt) < context_len and r_par < len(paragraphs):
+        while len(r_cxt) < context_len and r_par < len(mentioning_page_paragraphs):
             r_par += 1
-            par_text_ = paragraphs[r_par]
+            par_text_ = mentioning_page_paragraphs[r_par]
             # take as much text as available and still within context_len
             e = min(len(par_text_), context_len - len(r_cxt))
             r_cxt = r_cxt + par_text_[:e]
@@ -66,14 +79,14 @@ def basic_mention_extractor(mentioner, lookup_fn, anchor, config) -> [str, list[
     shifts = [-s] + list(accumulate(shifts))
 
     # retrieve mentions
-    anchor_pars = mentioner['anchors']['paragraph_id']
+    anchor_pars = mentioning_page_mentions['paragraph_id']
     # search for anchors within the paragraphs we used
     i = bisect_left(anchor_pars, l_par)
     j = bisect_left(anchor_pars, r_par + 1)
 
     mentions = []
     for anchor_idx in range(i, j):
-        anchor = {key: values[anchor_idx] for key, values in mentioner['anchors'].items()}
+        anchor = {key: values[anchor_idx] for key, values in mentioning_page_mentions.items()}
 
         p = anchor['paragraph_id'] - l_par
         start = anchor['start'] + shifts[p]
@@ -86,13 +99,13 @@ def basic_mention_extractor(mentioner, lookup_fn, anchor, config) -> [str, list[
             "mentioned_wikipedia_id": anchor['wikipedia_id'],
         }
 
-        if 'mentioned_wikipedia_title' in config.optional_fields_to_add:
+        if 'mentioned_wikipedia_title' in mentioned_page_features_to_add:
             mention['mentioned_wikipedia_title'] = anchor['wikipedia_title']
 
-        if config.mentioned_features:
-            mentioned = lookup_fn(anchor['wikipedia_id'])
+        if len(mentioned_page_features_to_add - {'mentioned_wikipedia_title'}) > 0:
+            mentioned = page_lookup_function(anchor['wikipedia_id'])
 
-            if 'mentioned_categories' in config.optional_fields_to_add:
+            if 'mentioned_categories' in mentioned_page_features_to_add:
                 mention['mentioned_categories'] = mentioned['categories']
 
             # TODO mentioned_text
@@ -100,6 +113,32 @@ def basic_mention_extractor(mentioner, lookup_fn, anchor, config) -> [str, list[
         mentions.append(mention)
 
     return text, mentions
+
+
+def basic_mention_extractor(mentioner, lookup_fn, anchor, config: "KILTWikipediaForELConfig") -> [str, list[dict]]:
+    """
+    Simple mention extractor which has fixed context length and always places the 'main' mention in the center
+    (there will still be other mentions in non-central locations).
+    Args:
+        mentioner:  Wikipedia page in which mention occurs.
+        lookup_fn:  Function to retrieve wikipedia pages by ID.
+        anchor:     Location (Wikipedia page title and ID, paragraph ID, character offsets) and contents (text, href)
+                    of the mention we are extracting.
+        config:     Dataset configuration.
+
+    Returns:
+        text (mention with context) and list of mentions (character offsets and the ID of page mentioned).
+    """
+    return mention_extractor(
+        mention_start_c=anchor['start'],
+        mention_end_c=anchor['end'],
+        mention_par_idx=anchor['paragraph_id'],
+        mentioning_page_paragraphs=mentioner['text']['paragraph'],
+        mentioning_page_mentions=mentioner['anchors'],
+        max_mention_context_length=config.max_mention_context_length,
+        mentioned_page_features_to_add=set(config.optional_fields_to_add),
+        page_lookup_function=lookup_fn,
+    )
 
 
 @dataclass()
@@ -126,6 +165,7 @@ class KILTWikipediaForELConfig(datasets.BuilderConfig):
 
     max_samples: int = sys.maxsize
 
+    # Minimum nr. of entities that must be in the dataset for an entity to be included.
     minimum_mentions: int = 0
 
     def __post_init__(self):
@@ -135,10 +175,6 @@ class KILTWikipediaForELConfig(datasets.BuilderConfig):
         if not self.optional_fields_to_add.issubset(self.OPTIONAL_FIELDS):
             raise ValueError(f"invalid optional fields: "
                              f"{self.optional_fields_to_add - self.OPTIONAL_FIELDS}")
-
-        self.mentioned_features = \
-            'mentioned_categories' in self.optional_fields_to_add
-        #   'mentioned_text' in self.optional_fields_to_add
 
 
 class KILTWikipediaForEL(datasets.GeneratorBasedBuilder):

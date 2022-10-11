@@ -9,6 +9,16 @@ from transformers.models.auto.auto_factory import _get_model_class
 from modeling_versatile import create_versatile_class
 
 
+def list_of_dicts_to_dict_of_lists(list_of_dicts):
+    keys = frozenset.union(*(frozenset(d.keys()) for d in list_of_dicts))
+    return {k: [d[k] for d in list_of_dicts] for k in keys}
+
+
+def dict_of_lists_to_list_of_dicts(dict_of_lists):
+    length = min(len(l) for _, l in dict_of_lists.items())
+    return [{k: l[i] for k, l in dict_of_lists.items()} for i in range(length)]
+
+
 def create_run_folder_and_config_dict(args):
     if args.run_name:
         run_name = args.run_name

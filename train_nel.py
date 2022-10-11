@@ -2,8 +2,10 @@ import argparse
 
 import datasets
 import numpy as np
+import scipy.sparse as sp_sparse
+import pandas as pd
 
-from datasets import load_dataset, DatasetDict, ClassLabel
+from datasets import load_dataset, DatasetDict, ClassLabel, Dataset
 from transformers import AutoTokenizer, BatchEncoding, TrainingArguments, Trainer, EarlyStoppingCallback, \
     TrainerCallback, TrainerState, TrainerControl
 
@@ -15,16 +17,19 @@ from utils import create_run_folder_and_config_dict, create_or_load_versatile_mo
 from data_collator import DataCollatorForTokenClassification
 from modeling_entity_linking import EntityLinking
 
+TASK_KEY = 'nel'
+LABELS_KEY = f'{TASK_KEY}_labels'
 
-def kilt_for_el_dataset(config, tokenizer):
-    def construct_iob_labels(example, batch_encoding: BatchEncoding, ):
+
+def kilt_for_el_dataset(config, tokenizer, base_dataset, skip_labels=False):
+    def construct_labels(example, batch_encoding: BatchEncoding):
         def warn(s_t, e_t, s_c, e_c):
             print(f"\nWARNING: "
                   f"\nstart_token={s_t}, end_token={e_t} "
                   f"\nstart_char={s_c}, end_char={e_c} "
                   f"\ntext:\n {example['mentioning_text']}")
 
-        labels = ['O'] * len(batch_encoding['input_ids'])
+        labels = [0] * len(batch_encoding['input_ids'])
         start_chars = example['mentions']['start_char']
         end_chars = example['mentions']['end_char']
         entities = example['mentions']['mentioned_wikipedia_id']
@@ -46,49 +51,119 @@ def kilt_for_el_dataset(config, tokenizer):
                 continue
 
             for t in range(start_token, end_token + 1):
-                labels[t] = e
+                labels[t] = int(e)
 
-        batch_encoding['labels'] = labels
+        batch_encoding[LABELS_KEY] = labels
         return batch_encoding
 
-    kwargs = {}
-    if config['nel_dataset_size']:
-        kwargs['max_samples'] = config['nel_dataset_size']
-    if config['nel_minimum_nr_mentions']:
-        kwargs['minimum_mentions'] = config['nel_minimum_nr_mentions']
-    dataset = load_dataset(
-        dataset_el_wiki.__file__,
-        split='full',
-        **kwargs
-    )
-
-    import itertools
-    label_names = list(set(itertools.chain.from_iterable(dataset.flatten()['mentions.mentioned_wikipedia_id'])))
-    entity_label = ClassLabel(names=['O']+label_names)
-
     # tokenize
-    tokenized_dataset = dataset.map(
-        lambda example: construct_iob_labels(
-            example,
-            tokenizer(
-                example['mentioning_text'],
-                truncation=True
-            )
-        ), batched=False
-    ).remove_columns(['mentioning_text', 'mentions'])
+    if not skip_labels:
+        tokenized_dataset = base_dataset.map(
+            lambda example: construct_labels(
+                example,
+                tokenizer(example['mentioning_text'], truncation=True)
+            ), batched=False
+        ).remove_columns(['mentioning_text', 'mentions'])
+    else:
+        tokenized_dataset = base_dataset.map(
+            lambda example: tokenizer(example['mentioning_text'], truncation=True)
+        ).remove_columns(['mentioning_text', 'mentions'])
 
-    tokenized_dataset = tokenized_dataset.map(
-        lambda example: {'labels': entity_label.str2int(example['labels'])}, batched=False)
+    # tokenized_dataset = tokenized_dataset.map(
+    #     lambda example: {LABELS_KEY:/
+    #     entity_label.str2int(example[LABELS_KEY])}, batched=False)
 
-    train_eval = tokenized_dataset.train_test_split(test_size=0.01)
+    return tokenized_dataset#, len(label_names)+1
+
+
+def full_kilt(config, tokenizer):
+    kwargs = {}
+    if config['full_kilt_dataset_size']:
+        kwargs['max_samples'] = config['full_kilt_dataset_size']
+    if config['full_kilt_minimum_nr_mentions']:
+        kwargs['minimum_mentions'] = config['full_kilt_minimum_nr_mentions']
+    dataset = load_dataset(dataset_el_wiki.__file__, split='full', **kwargs)
+    dataset = kilt_for_el_dataset(config, tokenizer, dataset)
+
+    train_eval = dataset.train_test_split(test_size=0.01)
     valid_test = train_eval['test'].train_test_split(test_size=0.5)
     kilt_dataset = DatasetDict({
         'train': train_eval['train'],
         'validation': valid_test['train'],
         'test': valid_test['test']
     })
+    return kilt_dataset
 
-    return kilt_dataset, len(label_names)+1
+
+def kilt_aidayago(config, tokenizer):
+    def process_split(split):
+        df = pd.DataFrame(split)
+
+        df[['article_id', 'mention_id']] = df.apply(
+            lambda row: row['id'].split('_')[1].split(':'),
+            result_type='expand', axis=1,
+        )
+
+        START_TOKEN, END_TOKEN = "[START_ENT] ", "[END_ENT] "
+
+        def aggregate(article):
+            text = next(iter(article.input)).replace(START_TOKEN, '').replace(END_TOKEN, '')
+            start = article.input.apply(lambda x: x.find(START_TOKEN))
+            end = article.input.apply(lambda x: x.find(END_TOKEN) - len(START_TOKEN))
+            wikipedia_id = article.output.apply(lambda y: y[0]['provenance'][0]['wikipedia_id'] if y else None)
+            wikipedia_title = article.output.apply(lambda y: y[0]['answer'] if y else None)
+            frame = pd.DataFrame({
+                'article_id': next(iter(article.article_id)),
+                'text': text,
+                'start': start,
+                'end': end,
+            })
+            frame['mentions'] = [{
+                'start': list(article.input.apply(lambda x: x.find(START_TOKEN))),
+                'end': list(article.input.apply(lambda x: x.find(END_TOKEN) - len(START_TOKEN))),
+                'paragraph_id': [0] * len(article.input),
+                'wikipedia_id': list(wikipedia_id),
+                'wikipedia_title': list(wikipedia_title),
+            }] * len(article.input)
+            return frame
+
+        grouped = df.groupby(by='article_id').apply(aggregate)
+
+        def apply_mention_extractor(x):
+            text, mentions = dataset_el_wiki.mention_extractor(
+                mention_start_c=x['start'],
+                mention_end_c=x['end'],
+                mention_par_idx=0,
+                mentioning_page_paragraphs=[x['text']],
+                mentioning_page_mentions=x['mentions'],
+                mentioned_page_features_to_add={'mentioned_wikipedia_title'}
+            )
+            mentions = utils.list_of_dicts_to_dict_of_lists(mentions)
+            return text, mentions
+
+        result = grouped.apply(apply_mention_extractor, result_type='expand', axis=1)
+        result.columns = ['mentioning_text', 'mentions']
+
+        split = Dataset.from_pandas(
+            result,
+            features=datasets.Features({
+                "mentioning_text": datasets.Value("string"),
+                "mentions": datasets.features.Sequence({
+                    "start_char": datasets.Value("int16"),
+                    "end_char": datasets.Value("int16"),
+                    "mentioned_wikipedia_id": datasets.Value("string"),
+                    "mentioned_wikipedia_title": datasets.Value("string")
+                })
+            })
+        )
+        return split
+
+    aidayago = load_dataset("kilt_tasks", name="aidayago2")
+    aidayago = DatasetDict({
+        key: kilt_for_el_dataset(config, tokenizer, process_split(split), skip_labels=(key == 'test'))
+        for key, split in aidayago.items()
+    })
+    return aidayago
 
 
 def compute_nel_metrics(eval_pred):
@@ -112,7 +187,7 @@ def compute_nel_metrics(eval_pred):
     # use cumsum to number entities and only keep tokens labelled as entity
     entity_numbering = entity_transitions.flatten().cumsum()
     entity_numbering = entity_numbering[labels.flatten() > 0]
-    entity_onehot = np.eye(np.max(entity_numbering)+1)[entity_numbering].astype(bool)[:, 1:]
+    entity_onehot = sp_sparse.eye(np.max(entity_numbering)+1, format='csr')[entity_numbering].astype(bool)[:, 1:]
     _, E = entity_onehot.shape
 
     # predicted entities (as indices into top-k)
@@ -122,15 +197,13 @@ def compute_nel_metrics(eval_pred):
     entity_preds_ = np.take_along_axis(top_k_idxs[entity_mask].reshape(-1, K), entity_preds[:, None], axis=1).squeeze()
     other_preds_ = np.take_along_axis(top_k_idxs[other_mask].reshape(-1, K), other_preds[:, None], axis=1).squeeze()
     entity_correct = entity_preds == 0                                                          # Et
-    other_correct = other_preds == 0                                                            # Ot
 
     # which entity-tokens are correct
-    entity_correct = entity_correct[:, None] * entity_onehot                                    # Et x E
+    entity_correct = entity_onehot.multiply(entity_correct[:, None])                            # Et x E
     # if at least one of the entity-tokens of the entities is correct
-    entity_weak = entity_correct.any(axis=0)                                                    # E
+    entity_weak = entity_correct.sum(axis=0) > 0                                                # E
     # if all the entity-tokens of the entities are correct
-    entity_correct[~entity_onehot] = True   # set default value to True for `all` check.
-    entity_strong = entity_correct.all(axis=0)                                                  # E
+    entity_strong = entity_correct.sum(axis=0) == entity_onehot.sum(axis=0)                     # E
 
     nr_correct_weak = entity_weak.sum()
     nr_correct_strong = entity_strong.sum()
@@ -160,13 +233,15 @@ def train_entity_linking(cli_config):
 
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
-    # kilt dataset
-    kilt_dataset, nr_entities = kilt_for_el_dataset(cli_config, tokenizer)
-    kilt_dataset = kilt_dataset.rename_column('labels', 'nel_labels')
+    datasets = {}
+    # kilt dataset (custom Wikipedia for EL)
+    datasets['full_kilt'] = full_kilt(cli_config, tokenizer)
 
-    #train_set = kilt_dataset['train']
-    train_set = datasets.concatenate_datasets([kilt_dataset['train'], kilt_dataset['validation']])
-    valid_set = kilt_dataset['validation']
+    # AIDA CoNLL-YAGO
+    datasets['aidayago'] = kilt_aidayago(cli_config, tokenizer)
+
+    train_set = datasets[cli_config['train_dataset']]['train']
+    valid_set = datasets[cli_config['valid_dataset']]['validation']
 
     # load model
     head_id = cli_config['head_id']
@@ -174,16 +249,19 @@ def train_entity_linking(cli_config):
     model = create_or_load_versatile_model(
         cli_config, {
             f'{head_id}_attach_layer': cli_config['head_attach_layer'],
-            f'{head_id}_nr_entities': nr_entities,
+            # f'{head_id}_nr_entities': 60600000,
         },
         heads
     )
+
+    model.heads[cli_config['head_id']].extend_embedding(train_set)
+    model.heads[cli_config['head_id']].extend_embedding(valid_set)
 
     training_args = TrainingArguments(
         cli_config['run_path'],
         fp16=True,
         save_total_limit=5,
-        label_names=["nel_labels"],
+        label_names=[LABELS_KEY],
         load_best_model_at_end=True,
         remove_unused_columns=False,
         num_train_epochs=cli_config['max_nr_epochs'],
@@ -221,7 +299,7 @@ def train_entity_linking(cli_config):
         compute_metrics=compute_nel_metrics,
         data_collator=DataCollatorForTokenClassification(
             tokenizer=tokenizer,
-            label_name='nel_labels'
+            label_name=LABELS_KEY
         ),
         callbacks=callbacks,
     )
@@ -258,17 +336,18 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--head_attach_layer', default=-1, type=int)
 
     # dataset
-    parser.add_argument('--train_dataset', choices=['kilt'], default='kilt')
-    parser.add_argument('--valid_dataset', choices=['kilt'], default='kilt')
-    parser.add_argument('--test_dataset', choices=['kilt'], default=['kilt'], nargs='*')
+    DATASETS = ['full_kilt', 'aidayago']
+    parser.add_argument('--train_dataset', choices=DATASETS, default='full_kilt')
+    parser.add_argument('--valid_dataset', choices=DATASETS, default='full_kilt')
+    parser.add_argument('--test_dataset', choices=DATASETS, default=['aidayago'], nargs='*')
 
-    parser.add_argument('--nel_dataset_size', default=None, type=int)
-    parser.add_argument('--nel_minimum_nr_mentions', default=0, type=int)
+    parser.add_argument('--full_kilt_dataset_size', default=None, type=int)
+    parser.add_argument('--full_kilt_minimum_nr_mentions', default=0, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
     parser.add_argument('--eval_metric', default='F1_W', type=str)
-    parser.add_argument('--eval_on_test', action='store_true')
+    #parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
