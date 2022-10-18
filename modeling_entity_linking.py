@@ -27,17 +27,20 @@ class EntityLinking(Head):
         self.attach_layer = config_dict.get(f'{key}_attach_layer', -1)
 
         self.wikipedia_id_to_idx = torch.nn.Parameter(
-            torch.full((60600000,), -1, dtype=torch.int32),
+            torch.full((61500000,), -1, dtype=torch.int32),
             requires_grad=False
         )
         self.wikipedia_id_to_idx[0] = 0
 
         self.entity_embedding = nn.Embedding(1, embedding_dim=config.hidden_size)
 
-        self.K = 128  # TODO make config parameter
+        self.K = config_dict.get(f'{key}_per_token_k', 128)
         self.loss = nn.BCEWithLogitsLoss(reduction='mean')
 
     def extend_embedding(self, dataset):
+        """
+        Extends the embedding to include entities from `dataset` that were previously unknown.
+        """
         import itertools
         wikipedia_ids = [int(id) for id in set(itertools.chain.from_iterable(dataset['nel_labels']))]
         print(f"minimum wikipedia_id: {min(wikipedia_ids)}")
@@ -46,7 +49,7 @@ class EntityLinking(Head):
         wikipedia_ids = torch.tensor(wikipedia_ids)
 
         current_embedding = self.entity_embedding
-        current_size, D = current_embedding.weight.shape
+        current_size, _ = current_embedding.weight.shape
 
         desired_ids = torch.LongTensor(wikipedia_ids)
         desired_idxs = torch.index_select(self.wikipedia_id_to_idx, -1, desired_ids)
@@ -57,6 +60,7 @@ class EntityLinking(Head):
         if new_size > current_size:
             print(f'Extending the embedding to {new_size}')
 
+            # Add pointers from previously unknown entities to new part of Embedding.
             self.wikipedia_id_to_idx.index_add_(
                 0, desired_ids[desired_idxs == -1],
                 torch.arange(start=current_size, end=new_size, dtype=torch.int32)
@@ -81,14 +85,15 @@ class EntityLinking(Head):
 
         hidden_states = base_outputs['hidden_states'][self.attach_layer]            # B x N x D
 
-        # Change -100 to padding_idx (so we can embed PAD tokens).
+        # convert wikipedia_id to index, and ignore PAD tokens and unknown entities
         pad_tokens = labels == -100                                                 # B x N
         labels[~pad_tokens] = torch.index_select(self.wikipedia_id_to_idx, -1, labels[~pad_tokens]).type(labels.type())
-        labels = labels[~pad_tokens & labels != -1]                                 # T
+        oov_tokens = labels == -1
+        labels = labels[~pad_tokens & ~oov_tokens]                                  # T
         entities = self.entity_embedding(labels)                                    # T x D
 
         # Score against each entity in batch.
-        hidden_states = hidden_states[~pad_tokens]                                  # T x D
+        hidden_states = hidden_states[~pad_tokens & ~oov_tokens]                    # T x D
         all_scores = hidden_states @ entities.T                                     # T x T
         same_labels = labels.unsqueeze(0).expand_as(all_scores) == labels.unsqueeze(1).expand_as(all_scores)
 

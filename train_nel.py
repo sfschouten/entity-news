@@ -4,10 +4,11 @@ import datasets
 import numpy as np
 import scipy.sparse as sp_sparse
 import pandas as pd
+import transformers
 
 from datasets import load_dataset, DatasetDict, ClassLabel, Dataset
 from transformers import AutoTokenizer, BatchEncoding, TrainingArguments, Trainer, EarlyStoppingCallback, \
-    TrainerCallback, TrainerState, TrainerControl
+    TrainerCallback, TrainerState, TrainerControl, AdamW
 
 import wandb
 
@@ -69,11 +70,7 @@ def kilt_for_el_dataset(config, tokenizer, base_dataset, skip_labels=False):
             lambda example: tokenizer(example['mentioning_text'], truncation=True)
         ).remove_columns(['mentioning_text', 'mentions'])
 
-    # tokenized_dataset = tokenized_dataset.map(
-    #     lambda example: {LABELS_KEY:/
-    #     entity_label.str2int(example[LABELS_KEY])}, batched=False)
-
-    return tokenized_dataset#, len(label_names)+1
+    return tokenized_dataset
 
 
 def full_kilt(config, tokenizer):
@@ -170,10 +167,10 @@ def compute_nel_metrics(eval_pred):
     (logits, top_k_idxs), labels = eval_pred
     _, _, K = logits.shape
     logits = logits[logits != -100].reshape(-1, K)
-    top_k_idxs = top_k_idxs[top_k_idxs != -100].reshape(-1, K)
+    top_k_idxs = top_k_idxs[top_k_idxs >= 0].reshape(-1, K)
 
-    entity_mask = labels[labels != -100] > 0                                                    # Et
-    other_mask = labels[labels != -100] == 0                                                    # Ot
+    entity_mask = labels[labels >= 0] > 0                                                       # Et
+    other_mask = labels[labels >= 0] == 0                                                       # Ot
     entity_logits = logits[entity_mask].reshape(-1, K)                                          # Et x K
     other_logits = logits[other_mask].reshape(-1, K)                                            # Ot x K
 
@@ -198,6 +195,9 @@ def compute_nel_metrics(eval_pred):
     other_preds_ = np.take_along_axis(top_k_idxs[other_mask].reshape(-1, K), other_preds[:, None], axis=1).squeeze()
     entity_correct = entity_preds == 0                                                          # Et
 
+    # how many entities we predicted in total
+    nr_predict = (entity_preds_ > 0).sum() + (other_preds_ > 0).sum()
+
     # which entity-tokens are correct
     entity_correct = entity_onehot.multiply(entity_correct[:, None])                            # Et x E
     # if at least one of the entity-tokens of the entities is correct
@@ -205,27 +205,27 @@ def compute_nel_metrics(eval_pred):
     # if all the entity-tokens of the entities are correct
     entity_strong = entity_correct.sum(axis=0) == entity_onehot.sum(axis=0)                     # E
 
-    nr_correct_weak = entity_weak.sum()
-    nr_correct_strong = entity_strong.sum()
+    def metrics(nr_correct):
+        nr_grtruth = E
+        precision = nr_correct / nr_predict if nr_predict > 0 else float('inf')
+        recall = nr_correct / nr_grtruth
+        f1 = 2 * precision * recall / (precision + recall) if nr_predict > 0 else float('inf')
+        return precision, recall, f1
 
-    nr_predict = (entity_preds_ > 0).sum() + (other_preds_ > 0).sum()
-    nr_grtruth = E
-    precision_weak = nr_correct_weak / nr_predict if nr_predict > 0 else float('inf')
-    precision_strong = nr_correct_strong / nr_predict if nr_predict > 0 else float('inf')
-    recall_weak = nr_correct_weak / nr_grtruth
-    recall_strong = nr_correct_strong / nr_grtruth
-    f1_weak = 2 * precision_weak * recall_weak / (precision_weak + recall_weak) if nr_predict > 0 else float('nan')
-    f1_strong = 2 * precision_strong * recall_strong / (precision_strong + recall_strong) if nr_predict > 0 else float('nan')
+    p_weak, r_weak, f1_weak = metrics(entity_weak.sum())
+    p_strong, r_strong, f1_strong = metrics(entity_strong.sum())
 
     result = {
-        'Precision_W': precision_weak,
-        'Recall_W': recall_weak,
-        'F1_W': f1_weak,
-        'Precision_S': precision_strong,
-        'Recall_S': recall_strong,
-        'F1_S': f1_strong,
+        'Precision_W': p_weak,      'Recall_W': r_weak,     'F1_W': f1_weak,
+        'Precision_S': p_strong,    'Recall_S': r_strong,   'F1_S': f1_strong,
     }
     return result
+
+
+DATASET_LOADERS = {
+    'full_kilt': full_kilt,
+    'aidayago': kilt_aidayago,
+}
 
 
 def train_entity_linking(cli_config):
@@ -234,11 +234,11 @@ def train_entity_linking(cli_config):
     tokenizer = AutoTokenizer.from_pretrained(cli_config['model'])
 
     datasets = {}
-    # kilt dataset (custom Wikipedia for EL)
-    datasets['full_kilt'] = full_kilt(cli_config, tokenizer)
-
-    # AIDA CoNLL-YAGO
-    datasets['aidayago'] = kilt_aidayago(cli_config, tokenizer)
+    necessary_datasets = {cli_config[option] for option in ['train_dataset', 'valid_dataset']} \
+                       | {key for key in cli_config['test_dataset']}
+    for key in necessary_datasets:
+        loader = DATASET_LOADERS[key]
+        datasets[key] = loader(cli_config, tokenizer)
 
     train_set = datasets[cli_config['train_dataset']]['train']
     valid_set = datasets[cli_config['valid_dataset']]['validation']
@@ -249,13 +249,15 @@ def train_entity_linking(cli_config):
     model = create_or_load_versatile_model(
         cli_config, {
             f'{head_id}_attach_layer': cli_config['head_attach_layer'],
-            # f'{head_id}_nr_entities': 60600000,
         },
         heads
     )
 
+    # Initialize entity embeddings.
     model.heads[cli_config['head_id']].extend_embedding(train_set)
-    model.heads[cli_config['head_id']].extend_embedding(valid_set)
+    # Optionally, initialize embeddings for valid/test set as well (metrics will no longer be InKB)
+    # TODO make configurable
+    # model.heads[cli_config['head_id']].extend_embedding(valid_set)
 
     training_args = TrainingArguments(
         cli_config['run_path'],
@@ -264,6 +266,7 @@ def train_entity_linking(cli_config):
         label_names=[LABELS_KEY],
         load_best_model_at_end=True,
         remove_unused_columns=False,
+        lr_scheduler_type='constant_with_warmup',
         num_train_epochs=cli_config['max_nr_epochs'],
         per_device_train_batch_size=cli_config['batch_size_train'],
         per_device_eval_batch_size=cli_config['batch_size_eval'],
@@ -276,6 +279,21 @@ def train_entity_linking(cli_config):
         warmup_steps=cli_config['warmup_steps'],
         report_to=cli_config['report_to'],
     )
+
+    grouped_parameters = [
+        {
+            "params": model.heads.parameters(),
+            "initial_lr": 0.01,
+        },
+        {
+            "params": model.base_model.parameters(),
+            "initial_lr": 5e-5,
+        }
+    ]
+
+    optimizer = AdamW(params=grouped_parameters)
+    lr_scheduler = transformers.get_constant_schedule_with_warmup(
+        optimizer, cli_config['warmup_steps'], last_epoch=cli_config['max_nr_epochs'])
 
     class UnfreezeCallback(TrainerCallback):
         def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
@@ -302,6 +320,7 @@ def train_entity_linking(cli_config):
             label_name=LABELS_KEY
         ),
         callbacks=callbacks,
+        optimizers=(optimizer, lr_scheduler)
     )
 
     if cli_config['probing'] or cli_config['frozen_until']:
@@ -315,14 +334,16 @@ def train_entity_linking(cli_config):
 
     key = 'test' if cli_config['eval_on_test'] else 'validation'
     for test_set in cli_config['test_dataset']:
-        if test_set == 'kilt':
+        if test_set == 'full_kilt':
             print(f"Evaluating on KILT wikipedia {key} split.")
             result = trainer.evaluate(
-                kilt_dataset[key],
+                datasets[test_set][key],
                 metric_key_prefix=f'{key}_kilt',
                 ignore_keys=hidden_state_keys,
             )
             print(result)
+        elif test_set == 'aidayago' and key != 'test':
+            pass  #TODO
 
 
 def train_entity_linking_argparse(parser: argparse.ArgumentParser):
@@ -342,12 +363,12 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--test_dataset', choices=DATASETS, default=['aidayago'], nargs='*')
 
     parser.add_argument('--full_kilt_dataset_size', default=None, type=int)
-    parser.add_argument('--full_kilt_minimum_nr_mentions', default=0, type=int)
+    parser.add_argument('--full_kilt_minimum_nr_mentions', default=10, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
     parser.add_argument('--eval_frequency', default=500, type=int)
     parser.add_argument('--eval_metric', default='F1_W', type=str)
-    #parser.add_argument('--eval_on_test', action='store_true')
+    parser.add_argument('--eval_on_test', action='store_true')
 
     # hyper-parameters
     parser.add_argument('--max_nr_epochs', default=100, type=int)
