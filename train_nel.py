@@ -77,10 +77,15 @@ def full_kilt(config, tokenizer):
     kwargs = {}
     if config['full_kilt_dataset_size']:
         kwargs['max_samples'] = config['full_kilt_dataset_size']
+    if config['full_kilt_max_context_length']:
+        kwargs['max_mention_context_length'] = config['full_kilt_max_context_length']
     if config['full_kilt_minimum_nr_mentions']:
         kwargs['minimum_mentions'] = config['full_kilt_minimum_nr_mentions']
     dataset = load_dataset(dataset_el_wiki.__file__, split='full', **kwargs)
     dataset = kilt_for_el_dataset(config, tokenizer, dataset)
+
+    lengths = dataset.map(lambda sample: {'length': len(sample['input_ids'])}, batched=False)['length']
+    print(f'Longest sample is {np.max(lengths)} tokens long.')
 
     train_eval = dataset.train_test_split(test_size=0.01)
     valid_test = train_eval['test'].train_test_split(test_size=0.5)
@@ -363,6 +368,8 @@ def train_entity_linking_argparse(parser: argparse.ArgumentParser):
     parser.add_argument('--test_dataset', choices=DATASETS, default=['aidayago'], nargs='*')
 
     parser.add_argument('--full_kilt_dataset_size', default=None, type=int)
+    parser.add_argument('--full_kilt_max_context_length', default=300, type=int,
+                        help="Maximum number of characters in a mention's context.")
     parser.add_argument('--full_kilt_minimum_nr_mentions', default=10, type=int)
 
     parser.add_argument('--eval_strategy', default='steps', type=str)
