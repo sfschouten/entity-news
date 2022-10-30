@@ -84,8 +84,14 @@ def full_kilt(config, tokenizer):
     dataset = load_dataset(dataset_el_wiki.__file__, split='full', **kwargs)
     dataset = kilt_for_el_dataset(config, tokenizer, dataset)
 
-    lengths = dataset.map(lambda sample: {'length': len(sample['input_ids'])}, batched=False)['length']
-    print(f'Longest sample is {np.max(lengths)} tokens long.')
+    dataset = dataset.map(lambda sample: {'length': len(sample['input_ids'])}, batched=False)
+    lengths = dataset['length']
+    print(f'Average+-Std / Longest sample is {np.mean(lengths)}+-{np.std(lengths)} / {np.max(lengths)} tokens long.')
+
+    old_size = len(dataset)
+    dataset = dataset.filter(lambda sample: sample['length'] <= 110)
+    dataset = dataset.remove_columns(['length'])
+    print(f'Number of samples in filtered dataset: {len(dataset)} (from {old_size}).')
 
     train_eval = dataset.train_test_split(test_size=0.01)
     valid_test = train_eval['test'].train_test_split(test_size=0.5)
